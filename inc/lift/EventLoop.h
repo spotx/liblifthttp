@@ -50,7 +50,7 @@ public:
      * @return Gets the number of active HTTP requests currently running.
      */
     [[nodiscard]]
-    auto GetActiveRequestCount() const -> uint64_t;
+    auto HasUnfinishedRequests() -> bool;
 
     /**
      * @return The request pool for this EventLoop.

@@ -33,7 +33,7 @@ int main(int argc, char* argv[])
     // sleep for a bit so this thread doesn't grab the active request count too fast and just shutdown
     std::this_thread::sleep_for(500ms);
 
-    while (event_loop.GetActiveRequestCount() > 0) {
+    while (event_loop.HasUnfinishedRequests()) {
         std::this_thread::sleep_for(10ms);
     }
 

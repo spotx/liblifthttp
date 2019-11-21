@@ -59,7 +59,7 @@ int main(int argc, char* argv[])
     }
 
     // Now wait for all the requests to finish before cleaning up.
-    while (event_loop.GetActiveRequestCount() > 0) {
+    while (event_loop.HasUnfinishedRequests()) {
         std::this_thread::sleep_for(100ms);
     }
 

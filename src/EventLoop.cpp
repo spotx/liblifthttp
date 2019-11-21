@@ -125,7 +125,7 @@ EventLoop::~EventLoop()
 {
     m_is_stopping = true;
 
-    while (GetActiveRequestCount() > 0) {
+    while (HasUnfinishedRequests()) {
         std::this_thread::sleep_for(1ms);
     }
 
@@ -155,9 +155,15 @@ auto EventLoop::Stop() -> void
     m_is_stopping = true;
 }
 
-auto EventLoop::GetActiveRequestCount() const -> uint64_t
+auto EventLoop::HasUnfinishedRequests() -> bool
 {
-    return m_active_request_count;
+    if (m_active_request_count.load() > 0)
+    {
+        return true;
+    }
+    
+    std::lock_guard l{m_pending_requests_lock};
+    return !m_pending_requests.empty();
 }
 
 auto EventLoop::GetRequestPool() -> RequestPool&
