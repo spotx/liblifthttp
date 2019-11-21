@@ -33,16 +33,30 @@ static auto print_stats(
 static std::atomic<uint64_t> g_success { 0 };
 static std::atomic<uint64_t> g_error { 0 };
 
-static auto on_complete(lift::RequestHandle request, lift::EventLoop& event_loop) -> void
+static auto create_request() -> void
 {
-    if (request->GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
+
+}
+
+static auto on_complete(lift::Request& request, lift::EventLoop& event_loop) -> void
+{
+    if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         ++g_success;
     } else {
         ++g_error;
     }
-
+    
+    using namespace std::chrono_literals;
+    auto new_request = event_loop.GetRequestPool().Produce(
+        request.GetUrl(),
+        [&event_loop](lift::Request& r) {
+            on_complete(r, event_loop);
+        },
+        1s);
+    request.SetFollowRedirects(false);
+    request.AddHeader("Connection", "Keep-Alive");
     // And request again until we are shutting down.
-    event_loop.StartRequest(std::move(request));
+    event_loop.StartRequest(std::move(new_request));
 }
 
 int main(int argc, char* argv[])
@@ -73,8 +87,8 @@ int main(int argc, char* argv[])
 
                 auto request = request_pool.Produce(
                     url,
-                    [&event_loop](lift::RequestHandle r) {
-                        on_complete(std::move(r), event_loop);
+                    [&event_loop](lift::Request& r) {
+                        on_complete(r, event_loop);
                     },
                     1s);
                 request->SetFollowRedirects(false);

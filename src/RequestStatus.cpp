@@ -11,6 +11,7 @@ static const std::string REQUEST_STATUS_CONNECT_ERROR = "CONNECT_ERROR"s;
 static const std::string REQUEST_STATUS_CONNECT_DNS_ERROR = "CONNECT_DNS_ERROR"s;
 static const std::string REQUEST_STATUS_CONNECT_SSL_ERROR = "CONNECT_SSL_ERROR"s;
 static const std::string REQUEST_STATUS_TIMEOUT = "TIMEOUT"s;
+static const std::string REQUEST_STATUS_REQUEST_TIMEOUT = "REQUEST_TIMEOUT"s;
 static const std::string REQUEST_STATUS_RESPONSE_EMPTY = "RESPONSE_EMPTY"s;
 static const std::string REQUEST_STATUS_ERROR_FAILED_TO_START = "ERROR_FAILED_TO_START"s;
 static const std::string REQUEST_STATUS_ERROR = "ERROR"s;
@@ -33,6 +34,8 @@ auto to_string(RequestStatus request_status) -> const std::string&
         return REQUEST_STATUS_CONNECT_SSL_ERROR;
     case RequestStatus::TIMEOUT:
         return REQUEST_STATUS_TIMEOUT;
+    case RequestStatus::REQUEST_TIMEOUT:
+        return REQUEST_STATUS_REQUEST_TIMEOUT;
     case RequestStatus::RESPONSE_EMPTY:
         return REQUEST_STATUS_RESPONSE_EMPTY;
     case RequestStatus::DOWNLOAD_ERROR:

@@ -7,9 +7,12 @@
 #include <curl/curl.h>
 #include <uv.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <iostream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,6 +20,11 @@
 namespace lift {
 class RequestHandle;
 class RequestPool;
+class EventLoop;
+
+static uint64_t m_count = 0;
+
+class RequestTimeoutWrapper;
 
 class Request {
     friend class EventLoop;
@@ -41,14 +49,13 @@ public:
      * @param on_complete_handler When this request completes this handle is called.
      */
     auto SetOnCompleteHandler(
-        std::function<void(RequestHandle)> on_complete_handler) -> void;
+        std::function<void(Request&)> on_complete_handler) -> void;
 
     /**
      * @param url The URL of the HTTP request.
      * @return True if the url was set.
      */
-    auto SetUrl(
-        const std::string& url) -> bool;
+    auto SetUrl(std::string_view url) -> bool;
 
     /**
      * @return The currently set URL for this HTTP request.
@@ -74,8 +81,24 @@ public:
      * @param timeout The timeout for the request.
      * @return True if the timeout was set.
      */
-    auto SetTimeout(
+    auto SetConnectionTimeout(
         std::chrono::milliseconds timeout) -> bool;
+    
+    /**
+     * @return Reference to optional chrono milliseconds indicating how long the request has
+     *          before it times out. This should only be set when you want to give the request
+     *          a longer timeout to accommodate keep-alive connections that may have a slow
+     *          response.
+     */
+    [[nodiscard]]
+    auto GetRequestTimeout() const -> const std::optional<std::chrono::milliseconds>&;
+
+    /**
+     * Set chrono milliseconds indicating how long the request has before it times out.
+     * This should only be set when you want to give the request a longer timeout to accommodate
+     * keep-alive connections that may have a slow response.
+     */
+    auto SetRequestTimeout(std::chrono::milliseconds timeout) -> void;
 
     /**
      * Sets the maximum number of bytes of data to write.
@@ -228,19 +251,27 @@ public:
     /**
      * @return  the number of connections made to make this request
      */
+     [[nodiscard]]
     auto GetNumConnects() const -> uint64_t;
     
     /**
      * Set the verify behavior of the CURLOPT_SSL_VERIFYPEER on the curl_handle
      * @param verify the verify value to set the CURLOPT_SSL_VERIFYPEER option to
      */
-    auto SetVerifySSLPeer(int64_t verify) -> void;
+    auto SetVerifySSLPeer(bool verify) -> void;
 
     /**
      * Set the verify behavior of the CURLOPT_SSL_VERIFYHOST on the curl_handle
      * @param verify the verify value to set the CURLOPT_SSL_VERIFYHOST option to
      */
-    auto SetVerifySSLHost(int64_t verify) -> void;
+    auto SetVerifySSLHost(bool verify) -> void;
+    
+    /**
+     * Tells cURL to using an Accept-Encoding header that includes all built-in
+     * supported encodings in a comma-separated list.
+     * IMPORTANT: Using this is mutually exclusive with adding your own Accept-Encoding header.
+     */
+    auto SetAcceptAllEncoding() -> void;
 
     /**
      * Resets the request to be re-used.  This will clear everything on the request.
@@ -258,15 +289,15 @@ private:
      */
     explicit Request(
         RequestPool& request_pool,
-        const std::string& url,
+        std::string_view url,
         std::chrono::milliseconds timeout,
-        std::function<void(RequestHandle)> on_complete_handler = nullptr,
+        std::function<void(Request&)> on_complete_handler = nullptr,
         ssize_t max_download_bytes = -1);
 
     auto init() -> void;
 
     /// The onComplete() handler for asynchronous requests.
-    std::function<void(RequestHandle)> m_on_complete_handler;
+    std::function<void(Request&)> m_on_complete_handler;
 
     /// The request pool this request was produced from.
     RequestPool& m_request_pool;
@@ -302,6 +333,10 @@ private:
     ssize_t m_max_download_bytes { 0 };
     /// Number of bytes that have been written so far.
     ssize_t m_bytes_written { 0 };
+    
+    std::atomic_bool m_on_complete_called{false};
+    std::optional<std::chrono::milliseconds> m_request_timeout;
+    std::set<RequestTimeoutWrapper>::iterator m_set_location_iterator;
 
     /**
      * Prepares the request to be performed.  This is called on a request
@@ -324,13 +359,15 @@ private:
     auto setCompletionStatus(
         CURLcode curl_code) -> void;
 
-    auto onComplete() -> void;
+    auto onComplete(EventLoop& event_loop, bool request_connection_timeout = false) -> void;
 
     /**
      * Helper function to find how many bytes are left to be downloaded for a request
      * @return ssize_t found by subtracting total number of downloaded bytes from max_download_bytes
      */
     auto getRemainingDownloadBytes() -> ssize_t;
+    
+    auto setTimeoutIterator(std::set<RequestTimeoutWrapper>::iterator set_location) -> void;
 
     /// libcurl will call this function when a header is received for the HTTP request.
     friend auto curl_write_header(
@@ -349,6 +386,36 @@ private:
     /// libuv will call this function when the AddRequest() function is called.
     friend auto requests_accept_async(
         uv_async_t* handle) -> void;
+    
+    friend auto times_up(uv_timer_t* handle) -> void;
+};
+
+class RequestTimeoutWrapper
+{
+private:
+    struct Data
+    {
+        uint64_t m_timeout_time;
+        Request& m_request;
+        uint64_t m_id;
+    } m_data;
+public:
+    RequestTimeoutWrapper(uint64_t timeout_time, Request& request)
+        : m_data{timeout_time, request, m_count++}
+    {
+        std::cout << "Count " << m_count << std::endl;
+    }
+    
+    [[nodiscard]]
+    auto GetData() const -> const Data&
+    {
+        return m_data;
+    }
+    
+    auto operator<(const RequestTimeoutWrapper& other) const -> bool
+    {
+        return m_data.m_timeout_time < other.m_data.m_timeout_time;
+    }
 };
 
 } // namespace lift

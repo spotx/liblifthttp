@@ -42,7 +42,7 @@ public:
      * @return A request object setup for the URL.
      */
     auto Produce(
-        const std::string& url) -> RequestHandle;
+        std::string_view url) -> RequestHandle;
 
     /**
      * Produces a new Request with the specified timeout.
@@ -54,7 +54,7 @@ public:
      * @return A Request object setup for the URL + Timeout.
      */
     auto Produce(
-        const std::string& url,
+        std::string_view url,
         std::chrono::milliseconds timeout) -> RequestHandle;
 
     /**
@@ -68,8 +68,8 @@ public:
      * @return A Request object setup for the URL + Timeout.
      */
     auto Produce(
-        const std::string& url,
-        std::function<void(RequestHandle)> on_complete_handler,
+        std::string_view url,
+        std::function<void(Request&)> on_complete_handler,
         std::chrono::milliseconds timeout) -> RequestHandle;
 
 private:

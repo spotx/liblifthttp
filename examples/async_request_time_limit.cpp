@@ -8,14 +8,14 @@
 static uint64_t timeout_count{0};
 static uint64_t response_count{0};
 
-static auto on_complete(lift::RequestHandle request) -> void
+static auto on_complete(lift::Request& request) -> void
 {
-    if (request->GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
+    if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         ++response_count;
-        std::cout << "Completed in " << request->GetTotalTime().count() << " ms" << std::endl;
+        std::cout << "Completed in " << request.GetTotalTime().count() << " ms" << std::endl;
     } else {
         ++timeout_count;
-        std::cout << "Error in request: " << lift::to_string(request->GetCompletionStatus()) << std::endl;
+        std::cout << "Error in request: " << lift::to_string(request.GetCompletionStatus()) << std::endl;
     }
 }
 
@@ -59,7 +59,6 @@ int main(int argc, char* argv[])
         }
     }
     
-    using namespace std::chrono_literals;
     std::cout << "Timeout count " << timeout_count << std::endl;
     std::cout << "Response count " << response_count << std::endl;
     

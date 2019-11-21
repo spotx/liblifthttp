@@ -2,43 +2,46 @@
 
 #include <iostream>
 
-static auto on_complete(lift::RequestHandle request) -> void
+static auto on_complete(lift::Request& request) -> void
 {
-    switch (request->GetCompletionStatus()) {
+    switch (request.GetCompletionStatus()) {
         case lift::RequestStatus::SUCCESS:
             std::cout
-                << "Completed " << request->GetUrl()
-                << " ms:" << request->GetTotalTime().count() << std::endl;
+                << "Completed " << request.GetUrl()
+                << " ms:" << request.GetTotalTime().count() << std::endl;
             break;
         case lift::RequestStatus::CONNECT_ERROR:
-            std::cout << "Unable to connect to: " << request->GetUrl() << std::endl;
+            std::cout << "Unable to connect to: " << request.GetUrl() << std::endl;
             break;
         case lift::RequestStatus::CONNECT_DNS_ERROR:
-            std::cout << "Unable to lookup DNS entry for: " << request->GetUrl() << std::endl;
+            std::cout << "Unable to lookup DNS entry for: " << request.GetUrl() << std::endl;
             break;
         case lift::RequestStatus::CONNECT_SSL_ERROR:
-            std::cout << "SSL Error for: " << request->GetUrl() << std::endl;
+            std::cout << "SSL Error for: " << request.GetUrl() << std::endl;
             break;
         case lift::RequestStatus::TIMEOUT:
-            std::cout << "Timeout: " << request->GetUrl() << std::endl;
+            std::cout << "Timeout: " << request.GetUrl() << std::endl;
+            break;
+        case lift::RequestStatus::REQUEST_TIMEOUT:
+            std::cout << "Request Timeout: " << request.GetUrl() << std::endl;
             break;
         case lift::RequestStatus::RESPONSE_EMPTY:
-            std::cout << "No response received: " << request->GetUrl() << std::endl;
+            std::cout << "No response received: " << request.GetUrl() << std::endl;
             break;
         case lift::RequestStatus::DOWNLOAD_ERROR:
-            std::cout << "Error occurred in CURL write callback: " << request->GetUrl() << std::endl;
+            std::cout << "Error occurred in CURL write callback: " << request.GetUrl() << std::endl;
             break;
         case lift::RequestStatus::ERROR_FAILED_TO_START:
-            std::cout << "Error trying to start a request: " << request->GetUrl() << std::endl;
+            std::cout << "Error trying to start a request: " << request.GetUrl() << std::endl;
             break;
         case lift::RequestStatus::ERROR:
-            std::cout << "RequestHandle had an unrecoverable error: " << request->GetUrl() << std::endl;
+            std::cout << "RequestHandle had an unrecoverable error: " << request.GetUrl() << std::endl;
             break;
         case lift::RequestStatus::BUILDING:
         case lift::RequestStatus::EXECUTING:
             std::cout
                 << "RequestHandle is in an invalid state: "
-                << to_string(request->GetCompletionStatus()) << std::endl;
+                << to_string(request.GetCompletionStatus()) << std::endl;
             break;
     }
 }
