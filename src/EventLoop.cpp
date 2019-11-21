@@ -134,7 +134,7 @@ EventLoop::~EventLoop()
     m_is_stopping = true;
 
     while (HasUnfinishedRequests()) {
-        std::this_thread::sleep_for(1ms);
+        std::this_thread::sleep_for(10ms);
     }
 
     uv_timer_stop(&m_timeout_timer);
@@ -165,15 +165,15 @@ auto EventLoop::Stop() -> void
     m_is_stopping = true;
 }
 
+static auto has_pending_requests(std::mutex& mutex, const std::vector<RequestHandle>& pending_requests) -> bool
+{
+    std::unique_lock lock{mutex};
+    return !pending_requests.empty();
+}
+
 auto EventLoop::HasUnfinishedRequests() -> bool
 {
-    if (m_active_request_count.load() > 0)
-    {
-        return true;
-    }
-    
-    std::lock_guard l{m_pending_requests_lock};
-    return !m_pending_requests.empty();
+    return (m_active_request_count.load() > 0 || has_pending_requests(m_pending_requests_lock, m_pending_requests));
 }
 
 auto EventLoop::GetRequestPool() -> RequestPool&
@@ -193,8 +193,7 @@ auto EventLoop::StartRequest(
         std::lock_guard<std::mutex> guard { m_pending_requests_lock };
         m_pending_requests.emplace_back(std::move(request));
     }
-    auto result = uv_async_send(&m_async);
-    std::cout << "async send result from StartRequest " << result << std::endl;
+    uv_async_send(&m_async);
     return true;
 }
 
@@ -204,20 +203,14 @@ auto EventLoop::StopTimedOutRequests() -> void
     {
         return;
     }
-    else
-    {
-        std::cout << "Wrapper set size " << m_request_timeout_wrappers.size() << std::endl;
-    }
 
     auto now = uv_now(m_loop);
     for (
         auto current_wrapper = m_request_timeout_wrappers.begin();
         current_wrapper->GetData().m_timeout_time <= now && current_wrapper != m_request_timeout_wrappers.end();)
     {
-        current_wrapper->GetData().m_request.m_request_timeout.reset();
         current_wrapper->GetData().m_request.onComplete(*this, true);
-        printf("Deleting id via timeout for id %lu.\n", current_wrapper->GetData().m_id);
-        current_wrapper = m_request_timeout_wrappers.erase(current_wrapper);
+        current_wrapper = RemoveTimeoutByIterator(current_wrapper);
     }
     
     if (!m_request_timeout_wrappers.empty())
@@ -233,10 +226,10 @@ auto EventLoop::StopTimedOutRequests() -> void
     }
 }
 
-auto EventLoop::RemoveTimeoutByIterator(std::set<RequestTimeoutWrapper>::iterator request_to_remove) -> void
+auto EventLoop::RemoveTimeoutByIterator(std::set<RequestTimeoutWrapper>::iterator request_to_remove) -> std::set<RequestTimeoutWrapper>::iterator
 {
-    printf("Deleting id via iterator for id %lu.\n", request_to_remove->GetData().m_id);
-    m_request_timeout_wrappers.erase(request_to_remove);
+    request_to_remove->GetData().m_request.m_set_location_iterator.reset();
+    return m_request_timeout_wrappers.erase(request_to_remove);
 }
 
 auto EventLoop::run() -> void
@@ -410,9 +403,6 @@ auto requests_accept_async(uv_async_t* handle) -> void
 {
     auto* event_loop = static_cast<EventLoop*>(handle->data);
     
-    static uint64_t call_count = 0;
-    std::cout << __PRETTY_FUNCTION__ << " called: " << ++call_count << std::endl;
-
     /**
      * This lock must not have any "curl_*" functions called
      * while it is held, curl has its own internal locks and
@@ -426,7 +416,6 @@ auto requests_accept_async(uv_async_t* handle) -> void
         event_loop->m_grabbed_requests.swap(event_loop->m_pending_requests);
     }
 
-    printf("Starting loop for %lu requests\n", event_loop->m_grabbed_requests.size());
     for (auto& request : event_loop->m_grabbed_requests) {
         auto& raw_request_handle = request.m_request_handle;
         auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request_handle->m_curl_handle);
@@ -440,7 +429,6 @@ auto requests_accept_async(uv_async_t* handle) -> void
             auto& wrappers = event_loop->m_request_timeout_wrappers;
             if (wrappers.empty() || next_timepoint < wrappers.begin()->GetData().m_timeout_time)
             {
-                printf("Stopping and restarting timer\n");
                 uv_timer_stop(&event_loop->m_request_timer);
     
                 uv_timer_start(
@@ -450,10 +438,8 @@ auto requests_accept_async(uv_async_t* handle) -> void
                     0);
             }
             
-            printf("Adding new request timeout wrapper\n");
-            auto [iterator, success] = event_loop->m_request_timeout_wrappers.emplace(next_timepoint, *request);
+            auto iterator = event_loop->m_request_timeout_wrappers.emplace(next_timepoint, (*request));
             request->setTimeoutIterator(iterator);
-            printf("Done adding.\n");
         }
     
         if(curl_code != CURLM_OK && curl_code != CURLM_CALL_MULTI_PERFORM)
@@ -483,16 +469,8 @@ auto requests_accept_async(uv_async_t* handle) -> void
         }
     }
     
-    
-    printf("grabbed requests size %lu\n", event_loop->m_grabbed_requests.size());
     event_loop->m_active_request_count += event_loop->m_grabbed_requests.size();
     event_loop->m_grabbed_requests.clear();
-    if (!event_loop->m_pending_requests.empty())
-    {
-        printf("pending requests size %lu\n", event_loop->m_pending_requests.size());
-        auto result = uv_async_send(&event_loop->m_async);
-        std::cout << "pending async send result " << result << std::endl;
-    }
 }
 
 } // lift

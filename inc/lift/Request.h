@@ -22,8 +22,6 @@ class RequestHandle;
 class RequestPool;
 class EventLoop;
 
-static uint64_t m_count = 0;
-
 class RequestTimeoutWrapper;
 
 class Request {
@@ -336,7 +334,7 @@ private:
     
     std::atomic_bool m_on_complete_called{false};
     std::optional<std::chrono::milliseconds> m_request_timeout;
-    std::set<RequestTimeoutWrapper>::iterator m_set_location_iterator;
+    std::optional<std::set<RequestTimeoutWrapper>::iterator> m_set_location_iterator;
 
     /**
      * Prepares the request to be performed.  This is called on a request
@@ -397,13 +395,11 @@ private:
     {
         uint64_t m_timeout_time;
         Request& m_request;
-        uint64_t m_id;
     } m_data;
 public:
     RequestTimeoutWrapper(uint64_t timeout_time, Request& request)
-        : m_data{timeout_time, request, m_count++}
+        : m_data{timeout_time, request}
     {
-        std::cout << "Count " << m_count << std::endl;
     }
     
     [[nodiscard]]
@@ -414,7 +410,7 @@ public:
     
     auto operator<(const RequestTimeoutWrapper& other) const -> bool
     {
-        return m_data.m_timeout_time < other.m_data.m_timeout_time;
+        return m_data.m_timeout_time < other.m_data.m_timeout_time && &m_data.m_request == &other.m_data.m_request;
     }
 };
 

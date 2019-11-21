@@ -408,6 +408,7 @@ auto Request::Reset() -> void
     
     m_on_complete_called.store(false);
     m_request_timeout.reset();
+    m_set_location_iterator.reset();
 }
 
 auto Request::prepareForPerform() -> void
@@ -494,14 +495,11 @@ auto Request::onComplete(EventLoop& event_loop, bool request_connection_timeout)
 {
     auto request = std::unique_ptr<Request>(this);
     
-    printf("About to check on complete\n");
-    if (!m_on_complete_called.exchange(true))
+    if (!m_on_complete_called.exchange(true, std::memory_order_acquire))
     {
-        printf("On complete not called yet\n");
-        if (m_request_timeout.has_value())
+        if (!request_connection_timeout && m_set_location_iterator.has_value())
         {
-            event_loop.RemoveTimeoutByIterator(m_set_location_iterator);
-            m_request_timeout.reset();
+            event_loop.RemoveTimeoutByIterator(m_set_location_iterator.value());
         }
 
         if (request_connection_timeout)
@@ -628,6 +626,6 @@ auto curl_write_data(
 
 auto Request::setTimeoutIterator(std::set<RequestTimeoutWrapper>::iterator set_location) -> void
 {
-    m_set_location_iterator = set_location;
+    m_set_location_iterator.emplace(set_location);
 }
 } // lift

@@ -85,7 +85,7 @@ public:
         Container requests) -> void;
     
     auto StopTimedOutRequests() -> void;
-    auto RemoveTimeoutByIterator(std::set<RequestTimeoutWrapper>::iterator request_to_remove) -> void;
+    auto RemoveTimeoutByIterator(std::set<RequestTimeoutWrapper>::iterator request_to_remove) -> std::set<RequestTimeoutWrapper>::iterator;
 
 private:
     /**
@@ -138,7 +138,7 @@ private:
     std::atomic<bool> m_timeout_timer_closed { false };
     std::atomic<bool> m_request_timer_closed { false };
     
-    std::set<RequestTimeoutWrapper> m_request_timeout_wrappers;
+    std::multiset<RequestTimeoutWrapper> m_request_timeout_wrappers;
 
     /// The background thread runs from this function.
     auto run() -> void;

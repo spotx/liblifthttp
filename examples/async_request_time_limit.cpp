@@ -12,10 +12,12 @@ static auto on_complete(lift::Request& request) -> void
 {
     if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         ++response_count;
-        std::cout << "Completed in " << request.GetTotalTime().count() << " ms" << std::endl;
+        std::cout << "For url " << request.GetUrl() << ", ";
+        std::cout << "requested was successfully completed in " << request.GetTotalTime().count() << " ms" << std::endl;
     } else {
         ++timeout_count;
-        std::cout << "Error in request: " << lift::to_string(request.GetCompletionStatus()) << std::endl;
+        std::cout << "For url " << request.GetUrl() << ", ";
+        std::cout << "request was not successfully completed, with error: " << lift::to_string(request.GetCompletionStatus()) << std::endl;
     }
 }
 
@@ -54,7 +56,7 @@ int main(int argc, char* argv[])
         for (std::size_t count = 0; count < num_requests; ++count)
         {
             lift::RequestHandle request = request_pool.Produce(url, on_complete, 2'000ms);
-            //request->SetRequestTimeout(timeout_time);
+            request->SetRequestTimeout(timeout_time);
             event_loop.StartRequest(std::move(request));
         }
     }
