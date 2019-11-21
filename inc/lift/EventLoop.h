@@ -9,12 +9,15 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <vector>
 
 namespace lift {
 
 class CurlContext;
+
+auto times_up(uv_timer_t* handle) -> void;
 
 class EventLoop {
     friend CurlContext;
@@ -56,7 +59,6 @@ public:
      * @return The request pool for this EventLoop.
      */
     auto GetRequestPool() -> RequestPool&;
-
     /**
      * Adds a request to process.
      *
@@ -81,6 +83,9 @@ public:
     template <typename Container>
     auto StartRequests(
         Container requests) -> void;
+    
+    auto StopTimedOutRequests() -> void;
+    auto RemoveTimeoutByIterator(std::set<RequestTimeoutWrapper>::iterator request_to_remove) -> void;
 
 private:
     /**
@@ -102,6 +107,7 @@ private:
     uv_async_t m_async {};
     /// libcurl requires a single timer to drive timeouts/wake-ups.
     uv_timer_t m_timeout_timer {};
+    uv_timer_t m_request_timer {};
     /// The libcurl multi handle for driving multiple easy handles at once.
     CURLM* m_cmh { curl_multi_init() };
 
@@ -130,6 +136,9 @@ private:
     std::atomic<bool> m_async_closed { false };
     /// Flag to denote that the m_timeout_timer has been closed on shutdown.
     std::atomic<bool> m_timeout_timer_closed { false };
+    std::atomic<bool> m_request_timer_closed { false };
+    
+    std::set<RequestTimeoutWrapper> m_request_timeout_wrappers;
 
     /// The background thread runs from this function.
     auto run() -> void;

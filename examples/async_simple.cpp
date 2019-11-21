@@ -6,16 +6,16 @@
 #include <string>
 #include <thread>
 
-static auto on_complete(lift::RequestHandle request) -> void
+static auto on_complete(lift::Request& request) -> void
 {
-    if (request->GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
+    if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         std::cout
-            << "Completed " << request->GetUrl()
-            << " ms:" << request->GetTotalTime().count() << std::endl;
+            << "Completed " << request.GetUrl()
+            << " ms:" << request.GetTotalTime().count() << std::endl;
     } else {
         std::cout
-            << "Error: " << request->GetUrl() << " : "
-            << lift::to_string(request->GetCompletionStatus()) << std::endl;
+            << "Error: " << request.GetUrl() << " : "
+            << lift::to_string(request.GetCompletionStatus()) << std::endl;
     }
 
     /**
@@ -35,9 +35,10 @@ int main(int argc, char* argv[])
     lift::GlobalScopeInitializer lift_init {};
 
     std::vector<std::string> urls = {
-        "http://www.example.com",
+        /*"http://www.example.com",
         "http://www.google.com",
-        "http://www.reddit.com"
+        "http://www.reddit.com"*/
+        "http://testweb.spotx.tv/spotmarket/timeout.php"
     };
 
     lift::EventLoop event_loop;
@@ -50,7 +51,7 @@ int main(int argc, char* argv[])
      * and an additional 250ms timeout per each request.
      */
     std::chrono::milliseconds timeout = 250ms;
-    for (auto& url : urls) {
+    for (const auto& url : urls) {
         std::cout << "Requesting " << url << std::endl;
         lift::RequestHandle request = request_pool.Produce(url, on_complete, timeout);
         event_loop.StartRequest(std::move(request));

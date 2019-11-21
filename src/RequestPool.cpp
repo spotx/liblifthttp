@@ -13,28 +13,28 @@ auto RequestPool::Reserve(
                 *this,
                 "",
                 std::chrono::milliseconds { 0 },
-                [](RequestHandle r) { (void)r; }));
+                [](Request& r) { (void)r; }));
         m_requests.emplace_back(std::move(request_handle_ptr));
     }
 }
 
 auto RequestPool::Produce(
-    const std::string& url) -> RequestHandle
+    std::string_view url) -> RequestHandle
 {
     using namespace std::chrono_literals;
     return Produce(url, nullptr, 0ms);
 }
 
 auto RequestPool::Produce(
-    const std::string& url,
+    std::string_view url,
     std::chrono::milliseconds timeout) -> RequestHandle
 {
     return Produce(url, nullptr, timeout);
 }
 
 auto RequestPool::Produce(
-    const std::string& url,
-    std::function<void(RequestHandle)> on_complete_handler,
+    std::string_view url,
+    std::function<void(Request&)> on_complete_handler,
     std::chrono::milliseconds timeout) -> RequestHandle
 {
     m_lock.lock();
@@ -59,7 +59,7 @@ auto RequestPool::Produce(
 
         request_handle_ptr->SetOnCompleteHandler(std::move(on_complete_handler));
         request_handle_ptr->SetUrl(url);
-        request_handle_ptr->SetTimeout(timeout);
+        request_handle_ptr->SetConnectionTimeout(timeout);
 
         return RequestHandle { this, std::move(request_handle_ptr) };
     }

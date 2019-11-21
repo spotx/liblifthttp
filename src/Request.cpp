@@ -1,7 +1,9 @@
 #include "lift/Request.h"
+#include "lift/EventLoop.h"
 #include "lift/RequestHandle.h"
 
 #include <cstring>
+#include <iostream>
 
 namespace lift {
 auto curl_write_header(
@@ -21,9 +23,9 @@ static constexpr uint64_t HEADER_DEFAULT_COUNT = 16;
 
 Request::Request(
     RequestPool& request_pool,
-    const std::string& url,
+    std::string_view url,
     std::chrono::milliseconds timeout_ms,
-    std::function<void(RequestHandle)> on_complete_handler,
+    std::function<void(Request&)> on_complete_handler,
     ssize_t max_download_bytes)
     : m_on_complete_handler(std::move(on_complete_handler))
     , m_request_pool(request_pool)
@@ -31,7 +33,7 @@ Request::Request(
 {
     init();
     SetUrl(url);
-    SetTimeout(timeout_ms);
+    SetConnectionTimeout(timeout_ms);
 }
 
 Request::~Request()
@@ -68,18 +70,18 @@ auto Request::init() -> void
 }
 
 auto Request::SetOnCompleteHandler(
-    std::function<void(RequestHandle)> on_complete_handler) -> void
+    std::function<void(Request&)> on_complete_handler) -> void
 {
     m_on_complete_handler = std::move(on_complete_handler);
 }
 
-auto Request::SetUrl(const std::string& url) -> bool
+auto Request::SetUrl(std::string_view url) -> bool
 {
     if (url.empty()) {
         return false;
     }
 
-    auto error_code = curl_easy_setopt(m_curl_handle, CURLOPT_URL, url.c_str());
+    auto error_code = curl_easy_setopt(m_curl_handle, CURLOPT_URL, url.data());
     if (error_code == CURLE_OK) {
         char* curl_url = nullptr;
         curl_easy_getinfo(m_curl_handle, CURLINFO_EFFECTIVE_URL, &curl_url);
@@ -167,7 +169,7 @@ auto Request::SetMaxDownloadBytes(ssize_t max_download_bytes) -> void
     m_bytes_written = 0;
 }
 
-auto Request::SetTimeout(
+auto Request::SetConnectionTimeout(
     std::chrono::milliseconds timeout) -> bool
 {
     int64_t timeout_ms = timeout.count();
@@ -177,6 +179,16 @@ auto Request::SetTimeout(
         return (error_code == CURLE_OK);
     }
     return false;
+}
+
+auto Request::GetRequestTimeout() const -> const std::optional<std::chrono::milliseconds>&
+{
+    return m_request_timeout;
+}
+
+auto Request::SetRequestTimeout(std::chrono::milliseconds timeout) -> void
+{
+    m_request_timeout.emplace(timeout);
 }
 
 auto Request::SetFollowRedirects(
@@ -332,14 +344,40 @@ auto Request::GetCompletionStatus() const -> RequestStatus
     return m_status_code;
 }
 
-auto Request::SetVerifySSLPeer(int64_t verify) -> void
+auto Request::SetVerifySSLPeer(bool verify) -> void
 {
-    curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYPEER, verify);
+    if (verify)
+    {
+        curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYPEER, 1L);
+    }
+    else
+    {
+        curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
+    }
 }
 
-auto Request::SetVerifySSLHost(int64_t verify) -> void
+auto Request::SetVerifySSLHost(bool verify) -> void
 {
-    curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYHOST, verify);
+    if (verify)
+    {
+        // Re CURL docs (https://curl.haxx.se/libcurl/c/CURLOPT_SSL_VERIFYHOST.html),
+        // depending on the version of curl used, setting CURLOPT_SSL_VERIFYHOST to 1L vs 2L will
+        // have different results. To maintain forwards and backwards compatability, using 2L
+        curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYHOST, 2L);
+    }
+    else
+    {
+        curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+}
+
+auto Request::SetAcceptAllEncoding() -> void
+{
+    // From the CURL docs (https://curl.haxx.se/libcurl/c/CURLOPT_ACCEPT_ENCODING.html):
+    // 'To aid applications not having to bother about what specific algorithms this particular
+    // libcurl build supports, libcurl allows a zero-length string to be set ("") to ask for an
+    // Accept-Encoding: header to be used that contains all built-in supported encodings.'
+    curl_easy_setopt(m_curl_handle, CURLOPT_ACCEPT_ENCODING, "");
 }
 
 auto Request::Reset() -> void
@@ -367,6 +405,9 @@ auto Request::Reset() -> void
 
     m_max_download_bytes = -1; // Set max download bytes to default to download entire file
     m_bytes_written = 0;
+    
+    m_on_complete_called.store(false);
+    m_request_timeout.reset();
 }
 
 auto Request::prepareForPerform() -> void
@@ -449,10 +490,35 @@ auto Request::setCompletionStatus(
 #pragma GCC diagnostic pop
 }
 
-auto Request::onComplete() -> void
+auto Request::onComplete(EventLoop& event_loop, bool request_connection_timeout) -> void
 {
-    RequestHandle request(&m_request_pool, std::unique_ptr<Request>(this));
-    m_on_complete_handler(std::move(request));
+    auto request = std::unique_ptr<Request>(this);
+    
+    printf("About to check on complete\n");
+    if (!m_on_complete_called.exchange(true))
+    {
+        printf("On complete not called yet\n");
+        if (m_request_timeout.has_value())
+        {
+            event_loop.RemoveTimeoutByIterator(m_set_location_iterator);
+            m_request_timeout.reset();
+        }
+
+        if (request_connection_timeout)
+        {
+            m_status_code = RequestStatus::REQUEST_TIMEOUT;
+        }
+        m_on_complete_handler(*request);
+    }
+    
+    if (request_connection_timeout)
+    {
+        (void)request.release();
+    }
+    else
+    {
+        RequestHandle request_handle(&m_request_pool, std::move(request));
+    }
 }
 
 auto Request::getRemainingDownloadBytes() -> ssize_t
@@ -560,4 +626,8 @@ auto curl_write_data(
     return data_length;
 }
 
+auto Request::setTimeoutIterator(std::set<RequestTimeoutWrapper>::iterator set_location) -> void
+{
+    m_set_location_iterator = set_location;
+}
 } // lift

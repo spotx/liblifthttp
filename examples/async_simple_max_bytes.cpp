@@ -6,19 +6,19 @@
 #include <string>
 #include <thread>
 
-static auto on_complete(lift::RequestHandle request) -> void
+static auto on_complete(lift::Request& request) -> void
 {
-    if (request->GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
+    if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         std::cout
-            << "Completed " << request->GetUrl()
-            << " in " << request->GetTotalTime().count() << " ms with a "
-            << "result length of " << request->GetResponseData().length() << std::endl
+            << "Completed " << request.GetUrl()
+            << " in " << request.GetTotalTime().count() << " ms with a "
+            << "result length of " << request.GetResponseData().length() << std::endl
             << std::endl;
     } else {
         std::cout
-            << "Error: " << request->GetUrl() << " : "
-            << lift::to_string(request->GetCompletionStatus()) << std::endl
-            << "Result length: " << request->GetResponseData().length() << std::endl
+            << "Error: " << request.GetUrl() << " : "
+            << lift::to_string(request.GetCompletionStatus()) << std::endl
+            << "Result length: " << request.GetResponseData().length() << std::endl
             << std::endl;
     }
 
