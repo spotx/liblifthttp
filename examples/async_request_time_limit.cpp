@@ -54,7 +54,7 @@ int main(int argc, char* argv[])
         for (std::size_t count = 0; count < num_requests; ++count)
         {
             lift::RequestHandle request = request_pool.Produce(url, on_complete, 2'000ms);
-            request->SetRequestTimeout(timeout_time);
+            //request->SetRequestTimeout(timeout_time);
             event_loop.StartRequest(std::move(request));
         }
         
