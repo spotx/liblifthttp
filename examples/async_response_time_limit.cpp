@@ -57,8 +57,7 @@ int main(int argc, char* argv[])
         
         for (std::size_t count = 0; count < num_requests; ++count)
         {
-            auto new_url = url + "?" + std::to_string(count);
-            lift::RequestHandle request = request_pool.Produce(new_url, on_complete, 2'000ms, timeout_time);
+            lift::RequestHandle request = request_pool.Produce(url, on_complete, 2'000ms, timeout_time);
             event_loop.StartRequest(std::move(request));
         }
     } // So we wait until the event loop destructs automatically

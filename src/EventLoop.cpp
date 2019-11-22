@@ -96,7 +96,7 @@ auto on_uv_curl_perform_callback(
 
 auto requests_accept_async(uv_async_t* handle) -> void;
 
-auto times_up(uv_timer_t* handle) -> void;
+auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void;
 
 
 EventLoop::EventLoop()
@@ -106,8 +106,11 @@ EventLoop::EventLoop()
 
     uv_timer_init(m_loop, &m_timeout_timer);
     m_timeout_timer.data = this;
-    uv_timer_init(m_loop, &m_request_timer);
-    m_request_timer.data = this;
+
+    // Initialize the request timer, which will be used to "stop" requests that have not received
+    // a response with in the requested time.
+    uv_timer_init(m_loop, &m_response_timer);
+    m_response_timer.data = this;
 
     curl_multi_setopt(m_cmh, CURLMOPT_SOCKETFUNCTION, curl_handle_socket_actions);
     curl_multi_setopt(m_cmh, CURLMOPT_SOCKETDATA, this);
@@ -136,13 +139,13 @@ EventLoop::~EventLoop()
 
     uv_timer_stop(&m_timeout_timer);
     uv_close(uv_type_cast<uv_handle_t>(&m_timeout_timer), uv_close_callback);
-    uv_timer_stop(&m_request_timer);
-    uv_close(uv_type_cast<uv_handle_t>(&m_request_timer), uv_close_callback);
+    uv_timer_stop(&m_response_timer);
+    uv_close(uv_type_cast<uv_handle_t>(&m_response_timer), uv_close_callback);
     uv_close(uv_type_cast<uv_handle_t>(&m_async), uv_close_callback);
     uv_async_send(&m_async); // fake a request to make sure the loop wakes up
     uv_stop(m_loop);
 
-    while (!m_timeout_timer_closed && !m_async_closed) {
+    while (!m_timeout_timer_closed && !m_request_timer_closed && !m_async_closed) {
         std::this_thread::sleep_for(1ms);
     }
 
@@ -170,7 +173,10 @@ static auto has_pending_requests(std::mutex& mutex, const std::vector<RequestHan
 
 auto EventLoop::HasUnfinishedRequests() -> bool
 {
-    return (m_active_request_count.load() > 0 || has_pending_requests(m_pending_requests_lock, m_pending_requests));
+    return (
+           (m_active_request_count.load() > 0)
+        || has_pending_requests(m_pending_requests_lock, m_pending_requests)
+    );
 }
 
 auto EventLoop::GetRequestPool() -> RequestPool&
@@ -196,39 +202,59 @@ auto EventLoop::StartRequest(
 
 auto EventLoop::stopTimedOutRequests() -> void
 {
-    if (m_request_timeout_wrappers.empty())
+    // If the wrappers multiset is empty, then we don't have anything to stop
+    if (m_response_wait_time_wrappers.empty())
     {
         return;
     }
 
+    // Get the current timepoint from libuv (it caches the current timepoint at the beginning
+    // of every cycle through the event loop, so this should not be expensive).
     auto now = uv_now(m_loop);
+
     for (
-        auto current_wrapper = m_request_timeout_wrappers.begin();
-        current_wrapper->GetData().m_timeout_time <= now && current_wrapper != m_request_timeout_wrappers.end();)
+        auto current_wrapper = m_response_wait_time_wrappers.begin();
+        current_wrapper != m_response_wait_time_wrappers.end() && current_wrapper->GetData().m_timeout_time <= now;
+        // We increment current_wrapper by setting it to the iterator returned from erasing the current one
+    )
     {
-        auto shared_request = std::shared_ptr<SharedRequest>(*current_wrapper->GetData().m_shared_request_ptr_pointer);
-        shared_request->GetAsPointer()->onComplete(*this, shared_request, true);
+        // Get the shared pointer out of the ResponseWaitTimeWrapper and into a unique pointer so it cleans
+        // itself up at the end of this method.
+        auto& data = current_wrapper->GetData();
+        auto shared_request = std::unique_ptr<std::shared_ptr<SharedRequest>>(data.m_shared_request_ptr_pointer);
+        
+        // Call onComplete on the underlying Request object, copying in the shared_pointer
+        // so we get a correct reference count.
+        (**shared_request).GetAsReference().onComplete(*this, *shared_request, true);
+        
+        // Update current_wrapper with the result of removing the wrapper from the multiset
         current_wrapper = removeTimeoutByIterator(current_wrapper);
     }
     
-    if (!m_request_timeout_wrappers.empty())
+    // If there are still items in the multiset, get the first item and use its time to reset the request timer.
+    if (!m_response_wait_time_wrappers.empty())
     {
-        auto& request_time = m_request_timeout_wrappers.begin()->GetData().m_timeout_time;
-        uv_timer_stop(&m_request_timer);
+        auto& request_time = m_response_wait_time_wrappers.begin()->GetData().m_timeout_time;
+        uv_timer_stop(&m_response_timer);
     
         uv_timer_start(
-            &m_request_timer,
-            times_up,
+            &m_response_timer,
+            on_response_wait_time_expired_callback,
             request_time - now,
             0);
     }
 }
 
-auto EventLoop::removeTimeoutByIterator(std::multiset<RequestTimeoutWrapper>::iterator request_to_remove) -> std::multiset<RequestTimeoutWrapper>::iterator
+auto EventLoop::removeTimeoutByIterator(std::multiset<ResponseWaitTimeWrapper>::iterator request_to_remove) -> std::multiset<ResponseWaitTimeWrapper>::iterator
 {
-    auto shared_request = std::make_unique<const std::shared_ptr<SharedRequest>>(*request_to_remove->GetData().m_shared_request_ptr_pointer);
+    // Get the shared pointer to SharedRequest into a unique pointer so it cleans itself up.
+    auto request_ptr = *request_to_remove->GetData().m_shared_request_ptr_pointer;
+    auto shared_request = std::make_unique<const std::shared_ptr<SharedRequest>>(request_ptr);
+    
+    // Reset the iterator stored on the Request so it can't be reused.
     (*shared_request)->GetAsPointer()->m_response_wait_time_set_iterator.reset();
-    return m_request_timeout_wrappers.erase(request_to_remove);
+    
+    return m_response_wait_time_wrappers.erase(request_to_remove);
 }
 
 auto EventLoop::run() -> void
@@ -364,7 +390,7 @@ auto uv_close_callback(uv_handle_t* handle) -> void
     {
         event_loop->m_timeout_timer_closed = true;
     }
-    else if (handle == uv_type_cast<uv_handle_t>(&event_loop->m_request_timer))
+    else if (handle == uv_type_cast<uv_handle_t>(&event_loop->m_response_timer))
     {
         event_loop->m_request_timer_closed = true;
     }
@@ -418,32 +444,40 @@ auto requests_accept_async(uv_async_t* handle) -> void
         event_loop->m_grabbed_requests.swap(event_loop->m_pending_requests);
     }
 
-    for (auto& request_handle : event_loop->m_grabbed_requests) {
+    for (auto& request_handle : event_loop->m_grabbed_requests)
+    {
         auto& raw_request = *request_handle;
         
-        if (const auto& request_timeout_opt = raw_request.GetRequestTimeout(); request_timeout_opt.has_value())
+        // If there's a response wait time, we'll need to create a ResponseWaitTimeWrapper and add
+        // it to the wrapper multiset so it can be handled in the event it takes too long to respond.
+        if (const auto& response_wait_time_opt = raw_request.GetResponseWaitTime(); response_wait_time_opt.has_value())
         {
+            // Get the current timepoint from libuv (it caches the current timepoint at the beginning
+            // of every cycle through the event loop, so this should not be expensive).
             auto time = uv_now(event_loop->m_loop);
-            const auto request_timeout = request_timeout_opt.value();
+            
+            const auto request_timeout = response_wait_time_opt.value();
             auto next_timepoint = time + static_cast<uint64_t>(request_timeout.count());
         
-            auto& wrappers = event_loop->m_request_timeout_wrappers;
+            auto& wrappers = event_loop->m_response_wait_time_wrappers;
+            
             if (wrappers.empty() || next_timepoint < wrappers.begin()->GetData().m_timeout_time)
             {
-                uv_timer_stop(&event_loop->m_request_timer);
-            
+                uv_timer_stop(&event_loop->m_response_timer);
+    
                 uv_timer_start(
-                    &event_loop->m_request_timer,
-                    times_up,
+                    &event_loop->m_response_timer,
+                    on_response_wait_time_expired_callback,
                     static_cast<uint64_t>(request_timeout.count()),
                     0);
             }
         
-            auto iterator = event_loop->m_request_timeout_wrappers.emplace(next_timepoint, request_handle.createSharedRequestOnHeap());
+            auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint, request_handle.createSharedRequestOnHeap());
             request_handle->setTimeoutIterator(iterator);
         }
     
-        // Put the shared_ptr to the SharedRequest on the heap and set curl handle's data to point to the pointer
+        // Put the shared_ptr to the SharedRequest on the heap and set curl handle's data to point to the pointer,
+        // so its lifetime is maintained even after exiting this function
         raw_request.setSharedPointerOnCurlHandle(request_handle.createSharedRequestOnHeap());
         
         auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request.m_curl_handle);
@@ -474,7 +508,7 @@ auto requests_accept_async(uv_async_t* handle) -> void
     event_loop->m_grabbed_requests.clear();
 }
 
-auto times_up(uv_timer_t* handle) -> void
+auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void
 {
     auto* event_loop = static_cast<EventLoop*>(handle->data);
     event_loop->stopTimedOutRequests();

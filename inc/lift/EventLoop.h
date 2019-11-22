@@ -102,7 +102,7 @@ private:
     uv_async_t m_async {};
     /// libcurl requires a single timer to drive timeouts/wake-ups.
     uv_timer_t m_timeout_timer {};
-    uv_timer_t m_request_timer {};
+    uv_timer_t m_response_timer {};
     /// The libcurl multi handle for driving multiple easy handles at once.
     CURLM* m_cmh { curl_multi_init() };
 
@@ -131,9 +131,16 @@ private:
     std::atomic<bool> m_async_closed { false };
     /// Flag to denote that the m_timeout_timer has been closed on shutdown.
     std::atomic<bool> m_timeout_timer_closed { false };
+    /// Flag to denote that the m_response_timer has been closed on shutdown.
     std::atomic<bool> m_request_timer_closed { false };
     
-    std::multiset<RequestTimeoutWrapper> m_request_timeout_wrappers;
+    /**
+     * multiset containing RequestTimeoutWrappers, where each item holds a timepoint indicating when it should be
+     * timed out and a pointer to a shared pointer to a SharedRequest, so the shared pointer to the SharedRequest
+     * can live on the heap.
+     * A multiset is used so that multiple RequestTimeoutWrappers with the same timepoint can be stored.
+     */
+    std::multiset<ResponseWaitTimeWrapper> m_response_wait_time_wrappers;
 
     /// The background thread runs from this function.
     auto run() -> void;
@@ -152,9 +159,19 @@ private:
         curl_socket_t socket,
         int event_bitmask) -> void;
     
+    /**
+     * Called by on_response_wait_time_expired_callback, this method iterates through m_response_wait_time_wrappers
+     * and calls onComplete for the Requests which have not received responses within the expected wait time.
+     */
     auto stopTimedOutRequests() -> void;
     
-    auto removeTimeoutByIterator(std::multiset<RequestTimeoutWrapper>::iterator request_to_remove) -> std::multiset<RequestTimeoutWrapper>::iterator;
+    /**
+     * Helper method to erase a ResponseWaitTimeWrapper object from the multiset using an iterator from the set.
+     * @param request_to_remove Iterator to erase from the multiset
+     * @return The next iterator in the multiset (this is returned from erase), so that we can loop through
+     *          the multiset and erase items as we god.
+     */
+    auto removeTimeoutByIterator(std::multiset<ResponseWaitTimeWrapper>::iterator request_to_remove) -> std::multiset<ResponseWaitTimeWrapper>::iterator;
     
     /**
      * This function is called by libcurl to start a timeout with duration timeout_ms.
@@ -249,7 +266,7 @@ private:
      *
      * @param handle The uv_timer_t handle, which will hold a pointer to the corresponding EventLoop in data
      */
-    friend auto times_up(uv_timer_t* handle) -> void;
+    friend auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void;
     
     /**
      * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have

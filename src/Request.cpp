@@ -73,11 +73,6 @@ auto Request::init() -> void
     m_response_data.reserve(HEADER_DEFAULT_MEMORY_BYTES);
 }
 
-auto Request::setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void
-{
-    curl_easy_setopt(m_curl_handle, CURLOPT_PRIVATE, shared_request);
-}
-
 auto Request::SetOnCompleteHandler(
     std::function<void(RequestHandle)> on_complete_handler) -> void
 {
@@ -188,16 +183,6 @@ auto Request::SetConnectionTimeout(
         return (error_code == CURLE_OK);
     }
     return false;
-}
-
-auto Request::GetRequestTimeout() const -> const std::optional<std::chrono::milliseconds>&
-{
-    return m_response_wait_time;
-}
-
-auto Request::SetResponseWaitTime(std::chrono::milliseconds timeout) -> void
-{
-    m_response_wait_time.emplace(timeout);
 }
 
 auto Request::SetFollowRedirects(
@@ -418,7 +403,6 @@ auto Request::Reset() -> void
     m_on_complete_has_been_called.store(false);
     m_response_wait_time.reset();
     m_response_wait_time_set_iterator.reset();
-    m_shared_request_ptr = nullptr;
 }
 
 auto Request::prepareForPerform() -> void
@@ -520,8 +504,11 @@ auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> s
             m_status_code = RequestStatus::REQUEST_TIMEOUT;
         }
         
-        // Call the on complete handler with a reference to the request.
-        m_on_complete_handler(std::move(request_handle_ptr));
+        if (m_on_complete_handler != nullptr)
+        {
+            // Call the on complete handler with a reference to the request.
+            m_on_complete_handler(std::move(request_handle_ptr));
+        }
     }
 }
 
@@ -636,10 +623,5 @@ auto curl_write_data(
     raw_request_ptr->m_bytes_written += data_length;
 
     return data_length;
-}
-
-auto Request::setTimeoutIterator(std::multiset<RequestTimeoutWrapper>::iterator set_location) -> void
-{
-    m_response_wait_time_set_iterator.emplace(set_location);
 }
 } // lift

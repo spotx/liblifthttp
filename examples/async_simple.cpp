@@ -36,10 +36,9 @@ int main(int argc, char* argv[])
     lift::GlobalScopeInitializer lift_init {};
 
     std::vector<std::string> urls = {
-        /*"http://www.example.com",
+        "http://www.example.com",
         "http://www.google.com",
-        "http://www.reddit.com"*/
-        "http://testweb.spotx.tv/spotmarket/timeout.php"
+        "http://www.reddit.com"
     };
 
     lift::EventLoop event_loop;

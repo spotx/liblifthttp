@@ -23,7 +23,7 @@ class RequestPool;
 class EventLoop;
 class SharedRequest;
 
-class RequestTimeoutWrapper;
+class ResponseWaitTimeWrapper;
 
 class Request {
     friend class EventLoop;
@@ -90,8 +90,15 @@ public:
      * @{
      */
     [[nodiscard]]
-    auto GetRequestTimeout() const -> const std::optional<std::chrono::milliseconds>&;
-    auto SetResponseWaitTime(std::chrono::milliseconds timeout) -> void;
+    auto GetResponseWaitTime() const -> const std::optional<std::chrono::milliseconds>&
+    {
+        return m_response_wait_time;
+    }
+    
+    auto SetResponseWaitTime(std::chrono::milliseconds timeout) -> void
+    {
+        m_response_wait_time.emplace(timeout);
+    }
     /** @} */
 
     /**
@@ -293,8 +300,6 @@ private:
         ssize_t max_download_bytes = -1);
 
     auto init() -> void;
-    
-    auto setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void;
 
     /// The onComplete() handler for asynchronous requests.
     std::function<void(RequestHandle)> m_on_complete_handler;
@@ -334,8 +339,6 @@ private:
     /// Number of bytes that have been written so far.
     ssize_t m_bytes_written { 0 };
     
-    std::shared_ptr<SharedRequest>* m_shared_request_ptr{nullptr};
-    
     /**
      * Bool indicating whether or not onComplete has been called (true) or not (false) so if a request exceeds
      * its response wait time, its on complete handler can be called only once.
@@ -348,10 +351,10 @@ private:
     std::optional<std::chrono::milliseconds> m_response_wait_time;
     
     /**
-     * Optional iterator to the location in the EventLoop's multiset where the corresponding RequestTimeoutWrapper.
+     * Optional iterator to the location in the EventLoop's multiset where the corresponding ResponseWaitTimeWrapper.
      * This will only be set if the response wait time is used.
      */
-    std::optional<std::multiset<RequestTimeoutWrapper>::iterator> m_response_wait_time_set_iterator;
+    std::optional<std::multiset<ResponseWaitTimeWrapper>::iterator> m_response_wait_time_set_iterator;
 
     /**
      * Prepares the request to be performed.  This is called on a request
@@ -392,7 +395,21 @@ private:
      * @param set_location The iterator from the set of RequestTimeoutWrappers used to "time out"
      * requests who have not received their responses within the response wait time.
      */
-    auto setTimeoutIterator(std::multiset<RequestTimeoutWrapper>::iterator set_location) -> void;
+    auto setTimeoutIterator(std::multiset<ResponseWaitTimeWrapper>::iterator set_location) -> void
+    {
+        m_response_wait_time_set_iterator.emplace(set_location);
+    }
+    
+    /**
+     * Updates the curl handle (m_curl_handle) so that its private data points to the shared_ptr<SharedRequest>
+     * on the heap in order to maintain the lifetime of SharedRequest.
+     * @param shared_request Pointer to the shared pointer to the SharedRequest that this curl handle should
+     *          use in callbacks.
+     */
+    auto setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void
+    {
+        curl_easy_setopt(m_curl_handle, CURLOPT_PRIVATE, shared_request);
+    }
 
     /// libcurl will call this function when a header is received for the HTTP request.
     friend auto curl_write_header(
@@ -412,14 +429,14 @@ private:
     friend auto requests_accept_async(
         uv_async_t* handle) -> void;
     
-    friend auto times_up(uv_timer_t* handle) -> void;
+    friend auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void;
 };
 
 /**
  * Class wrapping information used by EventLoop to "time out" requests that have not
  * received a response within the expected wait time.
  */
-class RequestTimeoutWrapper
+class ResponseWaitTimeWrapper
 {
 private:
     struct Data
@@ -433,7 +450,7 @@ private:
         std::shared_ptr<SharedRequest>* m_shared_request_ptr_pointer;
     } m_data;
 public:
-    RequestTimeoutWrapper(uint64_t timeout_time, std::shared_ptr<SharedRequest>* request) : m_data{timeout_time, request} {}
+    ResponseWaitTimeWrapper(uint64_t timeout_time, std::shared_ptr<SharedRequest>* request) : m_data{timeout_time, request} {}
     
     /**
      * @return Reference to the const Data struct associated with this wrapper.
@@ -443,10 +460,10 @@ public:
     
     /**
      * Less than operator used by the multiset of RequestTimeoutWrappers to find the correct slot to insert this into.
-     * @param other Reference to const RequestTimeoutWrapper to use for comparison.
+     * @param other Reference to const ResponseWaitTimeWrapper to use for comparison.
      * @return Bool indicating if this wrapper is less than the other wrapper (true) or not (false)
      */
-    auto operator<(const RequestTimeoutWrapper& other) const -> bool
+    auto operator<(const ResponseWaitTimeWrapper& other) const -> bool
     {
         return m_data.m_timeout_time < other.m_data.m_timeout_time;
     }

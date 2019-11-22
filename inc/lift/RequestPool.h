@@ -110,7 +110,7 @@ public:
         std::string_view url,
         std::function<void(RequestHandle)> on_complete_handler,
         std::chrono::milliseconds connection_timeout,
-        std::chrono::milliseconds response_wait_time) -> RequestHandle;
+        std::optional<std::chrono::milliseconds> response_wait_time) -> RequestHandle;
     
 private:
     /// Used for thread safe calls.

@@ -33,11 +33,6 @@ static auto print_stats(
 static std::atomic<uint64_t> g_success { 0 };
 static std::atomic<uint64_t> g_error { 0 };
 
-static auto create_request() -> void
-{
-
-}
-
 static auto on_complete(lift::RequestHandle request_ptr, lift::EventLoop& event_loop) -> void
 {
     auto& request = *request_ptr;
