@@ -10,12 +10,6 @@ using namespace std::chrono_literals;
 
 namespace lift {
 
-auto times_up(uv_timer_t* handle) -> void
-{
-    auto* event_loop = static_cast<EventLoop*>(handle->data);
-    event_loop->StopTimedOutRequests();
-}
-
 template <typename O, typename I>
 static auto uv_type_cast(I* i) -> O*
 {
@@ -101,6 +95,9 @@ auto on_uv_curl_perform_callback(
     int events) -> void;
 
 auto requests_accept_async(uv_async_t* handle) -> void;
+
+auto times_up(uv_timer_t* handle) -> void;
+
 
 EventLoop::EventLoop()
 {
@@ -197,7 +194,7 @@ auto EventLoop::StartRequest(
     return true;
 }
 
-auto EventLoop::StopTimedOutRequests() -> void
+auto EventLoop::stopTimedOutRequests() -> void
 {
     if (m_request_timeout_wrappers.empty())
     {
@@ -209,8 +206,9 @@ auto EventLoop::StopTimedOutRequests() -> void
         auto current_wrapper = m_request_timeout_wrappers.begin();
         current_wrapper->GetData().m_timeout_time <= now && current_wrapper != m_request_timeout_wrappers.end();)
     {
-        current_wrapper->GetData().m_request.onComplete(*this, true);
-        current_wrapper = RemoveTimeoutByIterator(current_wrapper);
+        auto shared_request = std::shared_ptr<SharedRequest>(*current_wrapper->GetData().m_request);
+        shared_request->GetAsPointer()->onComplete(*this, shared_request, true);
+        current_wrapper = removeTimeoutByIterator(current_wrapper);
     }
     
     if (!m_request_timeout_wrappers.empty())
@@ -226,9 +224,10 @@ auto EventLoop::StopTimedOutRequests() -> void
     }
 }
 
-auto EventLoop::RemoveTimeoutByIterator(std::set<RequestTimeoutWrapper>::iterator request_to_remove) -> std::set<RequestTimeoutWrapper>::iterator
+auto EventLoop::removeTimeoutByIterator(std::multiset<RequestTimeoutWrapper>::iterator request_to_remove) -> std::multiset<RequestTimeoutWrapper>::iterator
 {
-    request_to_remove->GetData().m_request.m_set_location_iterator.reset();
+    auto shared_request = std::make_unique<const std::shared_ptr<SharedRequest>>(*request_to_remove->GetData().m_request);
+    (*shared_request)->GetAsPointer()->m_response_wait_time_set_iterator.reset();
     return m_request_timeout_wrappers.erase(request_to_remove);
 }
 
@@ -270,7 +269,7 @@ auto EventLoop::checkActions(
             curl_multi_remove_handle(m_cmh, easy_handle);
 
             raw_request_handle_ptr->setCompletionStatus(easy_result);
-            raw_request_handle_ptr->onComplete(*this);
+            raw_request_handle_ptr->onComplete(*this, *raw_request_handle_ptr->getSharedRequestPointer());
 
             --m_active_request_count;
         }
@@ -416,31 +415,9 @@ auto requests_accept_async(uv_async_t* handle) -> void
         event_loop->m_grabbed_requests.swap(event_loop->m_pending_requests);
     }
 
-    for (auto& request : event_loop->m_grabbed_requests) {
-        auto& raw_request_handle = request.m_request_handle;
-        auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request_handle->m_curl_handle);
-    
-        if (const auto& request_timeout_opt = raw_request_handle->GetRequestTimeout(); request_timeout_opt.has_value())
-        {
-            auto time = uv_now(event_loop->m_loop);
-            const auto request_timeout = request_timeout_opt.value();
-            auto next_timepoint = time + static_cast<uint64_t>(request_timeout.count());
-    
-            auto& wrappers = event_loop->m_request_timeout_wrappers;
-            if (wrappers.empty() || next_timepoint < wrappers.begin()->GetData().m_timeout_time)
-            {
-                uv_timer_stop(&event_loop->m_request_timer);
-    
-                uv_timer_start(
-                    &event_loop->m_request_timer,
-                    times_up,
-                    static_cast<uint64_t>(request_timeout.count()),
-                    0);
-            }
-            
-            auto iterator = event_loop->m_request_timeout_wrappers.emplace(next_timepoint, (*request));
-            request->setTimeoutIterator(iterator);
-        }
+    for (auto& request_handle : event_loop->m_grabbed_requests) {
+        auto& raw_request = *request_handle;
+        auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request.m_curl_handle);
     
         if(curl_code != CURLM_OK && curl_code != CURLM_CALL_MULTI_PERFORM)
         {
@@ -448,11 +425,33 @@ auto requests_accept_async(uv_async_t* handle) -> void
              * If curl_multi_add_handle fails then notify the user that the request failed to start
              * immediately.
              */
-            request->setCompletionStatus(CURLcode::CURLE_SEND_ERROR);
-            request->onComplete(*event_loop);
+            request_handle->setCompletionStatus(CURLcode::CURLE_SEND_ERROR);
+            request_handle->onComplete(*event_loop, *request_handle.createSharedRequestOnHeap());
         }
         else
         {
+            if (const auto& request_timeout_opt = raw_request.GetRequestTimeout(); request_timeout_opt.has_value())
+            {
+                auto time = uv_now(event_loop->m_loop);
+                const auto request_timeout = request_timeout_opt.value();
+                auto next_timepoint = time + static_cast<uint64_t>(request_timeout.count());
+        
+                auto& wrappers = event_loop->m_request_timeout_wrappers;
+                if (wrappers.empty() || next_timepoint < wrappers.begin()->GetData().m_timeout_time)
+                {
+                    uv_timer_stop(&event_loop->m_request_timer);
+            
+                    uv_timer_start(
+                        &event_loop->m_request_timer,
+                        times_up,
+                        static_cast<uint64_t>(request_timeout.count()),
+                        0);
+                }
+        
+                auto iterator = event_loop->m_request_timeout_wrappers.emplace(next_timepoint, request_handle.createSharedRequestOnHeap());
+                request_handle->setTimeoutIterator(iterator);
+            }
+            
             /**
              * Immediately call curl's check action to get the current request moving.
              * Curl appears to have an internal queue and if it gets too long it might
@@ -465,12 +464,19 @@ auto requests_accept_async(uv_async_t* handle) -> void
              * processed by curl.  When curl is finished completing the request
              * it will be put back into a Request object for the client to use.
              */
-            (void)raw_request_handle.release();
+            raw_request.setSharedRequestPointer(request_handle.createSharedRequestOnHeap());
         }
     }
     
     event_loop->m_active_request_count += event_loop->m_grabbed_requests.size();
     event_loop->m_grabbed_requests.clear();
 }
+
+auto times_up(uv_timer_t* handle) -> void
+{
+    auto* event_loop = static_cast<EventLoop*>(handle->data);
+    event_loop->stopTimedOutRequests();
+}
+
 
 } // lift

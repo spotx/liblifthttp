@@ -17,8 +17,6 @@ namespace lift {
 
 class CurlContext;
 
-auto times_up(uv_timer_t* handle) -> void;
-
 class EventLoop {
     friend CurlContext;
 
@@ -83,9 +81,6 @@ public:
     template <typename Container>
     auto StartRequests(
         Container requests) -> void;
-    
-    auto StopTimedOutRequests() -> void;
-    auto RemoveTimeoutByIterator(std::set<RequestTimeoutWrapper>::iterator request_to_remove) -> std::set<RequestTimeoutWrapper>::iterator;
 
 private:
     /**
@@ -156,7 +151,11 @@ private:
     auto checkActions(
         curl_socket_t socket,
         int event_bitmask) -> void;
-
+    
+    auto stopTimedOutRequests() -> void;
+    
+    auto removeTimeoutByIterator(std::multiset<RequestTimeoutWrapper>::iterator request_to_remove) -> std::multiset<RequestTimeoutWrapper>::iterator;
+    
     /**
      * This function is called by libcurl to start a timeout with duration timeout_ms.
      *
@@ -242,6 +241,23 @@ private:
      */
     friend auto requests_accept_async(
         uv_async_t* handle) -> void;
+    
+    /**
+     * This function is called by libuv when the uv_timer_t handle for request times is triggered.
+     *
+     * This function is a friend so it can call stopTimedOutRequests.
+     *
+     * @param handle The uv_timer_t handle, which will hold a pointer to the corresponding EventLoop in data
+     */
+    friend auto times_up(uv_timer_t* handle) -> void;
+    
+    /**
+     * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
+     *          response wait times can be removed from the multiset of RequestTimeoutWrappers)
+     * @param response_wait_time_timeout Bool indicating whether or not onComplete was called because
+     *          a response wait time was exceeded (true) or not (false)
+     */
+    friend auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout) -> void;
 };
 
 } // lift

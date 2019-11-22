@@ -8,42 +8,37 @@ namespace lift {
 RequestHandle::RequestHandle(
     RequestPool* request_pool,
     std::unique_ptr<Request> request_handle)
-    : m_request_pool(request_pool)
-    , m_request_handle(std::move(request_handle))
-{
-}
+    : m_shared_request(std::make_shared<SharedRequest>(request_pool, std::move(request_handle)))
+{}
 
-RequestHandle::~RequestHandle()
+RequestHandle::RequestHandle(std::shared_ptr<SharedRequest> shared_request)
+    : m_shared_request(std::move(shared_request)) {}
+
+auto RequestHandle::createSharedRequestOnHeap() const -> std::shared_ptr<SharedRequest>*
 {
-    /**
-     * Only move the request handle into the pool if this is the 'valid'
-     * request object that still owns the data.
-     */
-    if (m_request_handle != nullptr && m_request_pool != nullptr) {
-        m_request_pool->returnRequest(std::move(m_request_handle));
-        m_request_pool = nullptr;
-        m_request_handle = nullptr;
-    }
+    auto* result = new std::shared_ptr<SharedRequest>(m_shared_request);
+    return result;
 }
 
 auto RequestHandle::operator*() -> Request&
 {
-    return *m_request_handle;
+    return m_shared_request->GetAsReference();
 }
 
 auto RequestHandle::operator*() const -> const Request&
 {
-    return *m_request_handle;
+    return m_shared_request->GetAsReference();
 }
 
 auto RequestHandle::operator-> () -> Request*
 {
-    return m_request_handle.get();
+    return m_shared_request->GetAsPointer();
 }
 
 auto RequestHandle::operator-> () const -> const Request*
 {
-    return m_request_handle.get();
+    return m_shared_request->GetAsPointer();
 }
+
 
 } // lift

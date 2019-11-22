@@ -24,16 +24,23 @@ static constexpr uint64_t HEADER_DEFAULT_COUNT = 16;
 Request::Request(
     RequestPool& request_pool,
     std::string_view url,
-    std::chrono::milliseconds timeout_ms,
-    std::function<void(Request&)> on_complete_handler,
+    std::chrono::milliseconds connection_time,
+    std::optional<std::chrono::milliseconds> response_wait_time,
+    std::function<void(RequestHandle)> on_complete_handler,
     ssize_t max_download_bytes)
     : m_on_complete_handler(std::move(on_complete_handler))
     , m_request_pool(request_pool)
     , m_max_download_bytes(max_download_bytes)
 {
+    static uint64_t id = 0;
+    m_id = ++id;
     init();
     SetUrl(url);
-    SetConnectionTimeout(timeout_ms);
+    SetConnectionTimeout(connection_time);
+    if (response_wait_time.has_value())
+    {
+        SetResponseWaitTime(response_wait_time.value());
+    }
 }
 
 Request::~Request()
@@ -70,7 +77,7 @@ auto Request::init() -> void
 }
 
 auto Request::SetOnCompleteHandler(
-    std::function<void(Request&)> on_complete_handler) -> void
+    std::function<void(RequestHandle)> on_complete_handler) -> void
 {
     m_on_complete_handler = std::move(on_complete_handler);
 }
@@ -183,12 +190,12 @@ auto Request::SetConnectionTimeout(
 
 auto Request::GetRequestTimeout() const -> const std::optional<std::chrono::milliseconds>&
 {
-    return m_request_timeout;
+    return m_response_wait_time;
 }
 
-auto Request::SetRequestTimeout(std::chrono::milliseconds timeout) -> void
+auto Request::SetResponseWaitTime(std::chrono::milliseconds timeout) -> void
 {
-    m_request_timeout.emplace(timeout);
+    m_response_wait_time.emplace(timeout);
 }
 
 auto Request::SetFollowRedirects(
@@ -382,6 +389,7 @@ auto Request::SetAcceptAllEncoding() -> void
 
 auto Request::Reset() -> void
 {
+    std::cout << "Resetting " << m_id << std::endl;
     m_url = std::string_view {};
     m_request_headers.clear();
     m_request_headers_idx.clear();
@@ -406,9 +414,10 @@ auto Request::Reset() -> void
     m_max_download_bytes = -1; // Set max download bytes to default to download entire file
     m_bytes_written = 0;
     
-    m_on_complete_called.store(false);
-    m_request_timeout.reset();
-    m_set_location_iterator.reset();
+    m_on_complete_has_been_called.store(false);
+    m_response_wait_time.reset();
+    m_response_wait_time_set_iterator.reset();
+    m_shared_request_ptr = nullptr;
 }
 
 auto Request::prepareForPerform() -> void
@@ -491,32 +500,41 @@ auto Request::setCompletionStatus(
 #pragma GCC diagnostic pop
 }
 
-auto Request::onComplete(EventLoop& event_loop, bool request_connection_timeout) -> void
+auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout) -> void
 {
-    auto request = std::unique_ptr<Request>(this);
+    // RequestHandle needs to be constructed from SharedRequest
+    auto request_handle_ptr = RequestHandle(std::move(shared_request));
     
-    if (!m_on_complete_called.exchange(true, std::memory_order_acquire))
+    // We only call the stored on complete function once!
+    if (!m_on_complete_has_been_called.exchange(true, std::memory_order_acquire))
     {
-        if (!request_connection_timeout && m_set_location_iterator.has_value())
+        // If the request did not time out and we have an iterator, remove it from the set so we won't try to call
+        // onComplete again.
+        if (!response_wait_time_timeout && m_response_wait_time_set_iterator.has_value())
         {
-            event_loop.RemoveTimeoutByIterator(m_set_location_iterator.value());
+            event_loop.removeTimeoutByIterator(m_response_wait_time_set_iterator.value());
         }
-
-        if (request_connection_timeout)
+        else if (response_wait_time_timeout)
         {
+            // But if the request did time out, set the on complete handler will know.
             m_status_code = RequestStatus::REQUEST_TIMEOUT;
         }
-        m_on_complete_handler(*request);
+        
+        // Call the on complete handler with a reference to the request.
+        m_on_complete_handler(std::move(request_handle_ptr));
     }
-    
-    if (request_connection_timeout)
-    {
-        (void)request.release();
-    }
-    else
-    {
-        RequestHandle request_handle(&m_request_pool, std::move(request));
-    }
+    // else
+    // {
+    //     // We've already called the callback once, don't do it again, just get the shared request, so it can destruct.
+    //     if (auto* shared_request_ptr = getSharedRequestPointer(); shared_request_ptr != nullptr)
+    //     {
+    //         std::unique_ptr<std::shared_ptr<SharedRequest>> shared_request{shared_request_ptr};
+    //     }
+    //     else
+    //     {
+    //         std::cout << "Tried to get shared pointer for second call back but it was null." << std::endl;
+    //     }
+    // }
 }
 
 auto Request::getRemainingDownloadBytes() -> ssize_t
@@ -531,6 +549,14 @@ auto curl_write_header(
     void* user_ptr) -> size_t
 {
     auto* raw_request_ptr = static_cast<Request*>(user_ptr);
+    
+    // If we've already called the on complete handler, the request might still be in userland,
+    // so we don't want to modify it.
+    if (raw_request_ptr->m_on_complete_has_been_called.load())
+    {
+        return 0;
+    }
+
     size_t data_length = size * nitems;
 
     std::string_view data_view { buffer, data_length };
@@ -624,8 +650,8 @@ auto curl_write_data(
     return data_length;
 }
 
-auto Request::setTimeoutIterator(std::set<RequestTimeoutWrapper>::iterator set_location) -> void
+auto Request::setTimeoutIterator(std::multiset<RequestTimeoutWrapper>::iterator set_location) -> void
 {
-    m_set_location_iterator.emplace(set_location);
+    m_response_wait_time_set_iterator.emplace(set_location);
 }
 } // lift

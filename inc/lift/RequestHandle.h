@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lift/Request.h"
+#include "lift/SharedRequest.h"
 
 #include <memory>
 
@@ -20,7 +21,7 @@ class RequestHandle {
     friend class EventLoop;
 
 public:
-    ~RequestHandle();
+    ~RequestHandle() = default;
     RequestHandle(const RequestHandle&) = delete;
     RequestHandle(RequestHandle&& from) = default;
     auto operator=(const RequestHandle&) = delete;
@@ -40,11 +41,13 @@ private:
     RequestHandle(
         RequestPool* request_pool,
         std::unique_ptr<Request> request_handle);
-
-    /// The request pool that owns this request.
-    RequestPool* m_request_pool;
-    /// The actual underlying request object.
-    std::unique_ptr<Request> m_request_handle;
+    
+    explicit RequestHandle(std::shared_ptr<SharedRequest> shared_request);
+    
+    [[nodiscard]]
+    auto createSharedRequestOnHeap() const -> std::shared_ptr<SharedRequest>*;
+    
+    std::shared_ptr<SharedRequest> m_shared_request;
 
     /// Friend so it can release the m_request_handle appropriately.
     friend auto requests_accept_async(

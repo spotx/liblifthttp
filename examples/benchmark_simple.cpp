@@ -38,8 +38,9 @@ static auto create_request() -> void
 
 }
 
-static auto on_complete(lift::Request& request, lift::EventLoop& event_loop) -> void
+static auto on_complete(lift::RequestHandle request_ptr, lift::EventLoop& event_loop) -> void
 {
+    auto& request = *request_ptr;
     if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         ++g_success;
     } else {
@@ -49,8 +50,8 @@ static auto on_complete(lift::Request& request, lift::EventLoop& event_loop) -> 
     using namespace std::chrono_literals;
     auto new_request = event_loop.GetRequestPool().Produce(
         request.GetUrl(),
-        [&event_loop](lift::Request& r) {
-            on_complete(r, event_loop);
+        [&event_loop](lift::RequestHandle r) {
+            on_complete(std::move(r), event_loop);
         },
         1s);
     request.SetFollowRedirects(false);
@@ -87,8 +88,8 @@ int main(int argc, char* argv[])
 
                 auto request = request_pool.Produce(
                     url,
-                    [&event_loop](lift::Request& r) {
-                        on_complete(r, event_loop);
+                    [&event_loop](lift::RequestHandle r) {
+                        on_complete(std::move(r), event_loop);
                     },
                     1s);
                 request->SetFollowRedirects(false);

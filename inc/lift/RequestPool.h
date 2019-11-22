@@ -14,7 +14,7 @@ namespace lift {
 class CurlPool;
 
 class RequestPool {
-    friend class RequestHandle;
+    friend class SharedRequest;
 
 public:
     RequestPool() = default;
@@ -45,17 +45,18 @@ public:
         std::string_view url) -> RequestHandle;
 
     /**
-     * Produces a new Request with the specified timeout.
+     * Produces a new Request with the specified connection_timeout.
      *
      * This produce method is best used for synchronous requests.
      *
      * @param url The url of the Request.
-     * @param timeout The timeout of the request.
+     * @param connection_timeout The maximum time to wait before quitting, calling the
+     *          on_complete_handler and closing the connection.
      * @return A Request object setup for the URL + Timeout.
      */
     auto Produce(
         std::string_view url,
-        std::chrono::milliseconds timeout) -> RequestHandle;
+        std::chrono::milliseconds connection_timeout) -> RequestHandle;
 
     /**
      * Produces a new Request.  This function is thread safe.
@@ -64,14 +65,53 @@ public:
      *
      * @param url The url of the Request.
      * @param on_complete_handler The on completion callback handler for this request.
-     * @param timeout The timeout of the request.
+     * @param connection_timeout The maximum time to wait before quitting, calling the
+     *          on_complete_handler and closing the connection.
      * @return A Request object setup for the URL + Timeout.
      */
     auto Produce(
         std::string_view url,
-        std::function<void(Request&)> on_complete_handler,
-        std::chrono::milliseconds timeout) -> RequestHandle;
-
+        std::function<void(RequestHandle)> on_complete_handler,
+        std::chrono::milliseconds connection_timeout) -> RequestHandle;
+    
+    /**
+     * Produces a new Request with the specified connection_timeout.
+     *
+     * This produce method is best used for synchronous requests.
+     *
+     * @param url The url of the Request.
+     * @param connection_timeout The maximum time to wait before quitting, calling the
+     *          on_complete_handler and closing the connection.
+     * @param response_wait_time The maximum time to wait before calling the on complete callback --
+     *          the request will still wait for the connection to return until the connection_timeout,
+     *          but the Request will no longer be accessible.
+     * @return A Request object setup for the URL + Timeout.
+     */
+    auto Produce(
+        std::string_view url,
+        std::chrono::milliseconds connection_timeout,
+        std::chrono::milliseconds response_wait_time) -> RequestHandle;
+    
+    /**
+     * Produces a new Request.  This function is thread safe.
+     *
+     * This produce method is best used for asynchronous requests.
+     *
+     * @param url The url of the Request.
+     * @param on_complete_handler The on completion callback handler for this request.
+     * @param connection_timeout The maximum time to wait before quitting, calling the
+     *          on_complete_handler and closing the connection.
+     * @param response_wait_time The maximum time to wait before calling the on complete callback --
+     *          the request will still wait for the connection to return until the connection_timeout,
+     *          but the Request will no longer be accessible.
+     * @return A Request object setup for the URL + Timeout.
+     */
+    auto Produce(
+        std::string_view url,
+        std::function<void(RequestHandle)> on_complete_handler,
+        std::chrono::milliseconds connection_timeout,
+        std::chrono::milliseconds response_wait_time) -> RequestHandle;
+    
 private:
     /// Used for thread safe calls.
     std::mutex m_lock {};

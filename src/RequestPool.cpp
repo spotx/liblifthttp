@@ -13,7 +13,8 @@ auto RequestPool::Reserve(
                 *this,
                 "",
                 std::chrono::milliseconds { 0 },
-                [](Request& r) { (void)r; }));
+                std::nullopt,
+                [](RequestHandle r) { (void)r; }));
         m_requests.emplace_back(std::move(request_handle_ptr));
     }
 }
@@ -27,15 +28,15 @@ auto RequestPool::Produce(
 
 auto RequestPool::Produce(
     std::string_view url,
-    std::chrono::milliseconds timeout) -> RequestHandle
+    std::chrono::milliseconds connection_timeout) -> RequestHandle
 {
-    return Produce(url, nullptr, timeout);
+    return Produce(url, nullptr, connection_timeout);
 }
 
 auto RequestPool::Produce(
     std::string_view url,
-    std::function<void(Request&)> on_complete_handler,
-    std::chrono::milliseconds timeout) -> RequestHandle
+    std::function<void(RequestHandle)> on_complete_handler,
+    std::chrono::milliseconds connection_timeout) -> RequestHandle
 {
     m_lock.lock();
 
@@ -47,7 +48,8 @@ auto RequestPool::Produce(
             new Request {
                 *this,
                 url,
-                timeout,
+                connection_timeout,
+                std::nullopt,
                 std::move(on_complete_handler) }
         };
 
@@ -59,8 +61,53 @@ auto RequestPool::Produce(
 
         request_handle_ptr->SetOnCompleteHandler(std::move(on_complete_handler));
         request_handle_ptr->SetUrl(url);
-        request_handle_ptr->SetConnectionTimeout(timeout);
+        request_handle_ptr->SetConnectionTimeout(connection_timeout);
 
+        return RequestHandle { this, std::move(request_handle_ptr) };
+    }
+}
+
+auto RequestPool::Produce(
+    std::string_view url,
+    std::chrono::milliseconds connection_timeout,
+    std::chrono::milliseconds response_wait_time) -> RequestHandle
+{
+    return Produce(url, nullptr, connection_timeout, response_wait_time);
+}
+
+
+auto RequestPool::Produce(
+    std::string_view url,
+    std::function<void(RequestHandle)> on_complete_handler,
+    std::chrono::milliseconds connection_timeout,
+    std::chrono::milliseconds response_wait_time) -> RequestHandle
+{
+
+    m_lock.lock();
+    
+    if (m_requests.empty()) {
+        m_lock.unlock();
+        
+        // Cannot use std::make_unique here since Request ctor is private friend.
+        auto request_handle_ptr = std::unique_ptr<Request> {
+            new Request {
+                *this,
+                url,
+                connection_timeout,
+                response_wait_time,
+                std::move(on_complete_handler) }
+        };
+        
+        return RequestHandle { this, std::move(request_handle_ptr) };
+    } else {
+        auto request_handle_ptr = std::move(m_requests.back());
+        m_requests.pop_back();
+        m_lock.unlock();
+        
+        request_handle_ptr->SetOnCompleteHandler(std::move(on_complete_handler));
+        request_handle_ptr->SetUrl(url);
+        request_handle_ptr->SetConnectionTimeout(connection_timeout);
+        
         return RequestHandle { this, std::move(request_handle_ptr) };
     }
 }
