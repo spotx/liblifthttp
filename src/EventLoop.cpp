@@ -131,7 +131,7 @@ EventLoop::~EventLoop()
     m_is_stopping = true;
 
     while (HasUnfinishedRequests()) {
-        std::this_thread::sleep_for(10ms);
+        std::this_thread::sleep_for(1ms);
     }
 
     uv_timer_stop(&m_timeout_timer);
@@ -206,7 +206,7 @@ auto EventLoop::stopTimedOutRequests() -> void
         auto current_wrapper = m_request_timeout_wrappers.begin();
         current_wrapper->GetData().m_timeout_time <= now && current_wrapper != m_request_timeout_wrappers.end();)
     {
-        auto shared_request = std::shared_ptr<SharedRequest>(*current_wrapper->GetData().m_request);
+        auto shared_request = std::shared_ptr<SharedRequest>(*current_wrapper->GetData().m_shared_request_ptr_pointer);
         shared_request->GetAsPointer()->onComplete(*this, shared_request, true);
         current_wrapper = removeTimeoutByIterator(current_wrapper);
     }
@@ -226,7 +226,7 @@ auto EventLoop::stopTimedOutRequests() -> void
 
 auto EventLoop::removeTimeoutByIterator(std::multiset<RequestTimeoutWrapper>::iterator request_to_remove) -> std::multiset<RequestTimeoutWrapper>::iterator
 {
-    auto shared_request = std::make_unique<const std::shared_ptr<SharedRequest>>(*request_to_remove->GetData().m_request);
+    auto shared_request = std::make_unique<const std::shared_ptr<SharedRequest>>(*request_to_remove->GetData().m_shared_request_ptr_pointer);
     (*shared_request)->GetAsPointer()->m_response_wait_time_set_iterator.reset();
     return m_request_timeout_wrappers.erase(request_to_remove);
 }
@@ -264,12 +264,15 @@ auto EventLoop::checkActions(
             CURL* easy_handle = message->easy_handle;
             CURLcode easy_result = message->data.result;
 
-            Request* raw_request_handle_ptr = nullptr;
-            curl_easy_getinfo(easy_handle, CURLINFO_PRIVATE, &raw_request_handle_ptr);
+            // So the reacquired shared_ptr destructs itself correctly, let's get it into a unique pointer
+            std::unique_ptr<std::shared_ptr<SharedRequest>> shared_request_ptr_pointer;
+            curl_easy_getinfo(easy_handle, CURLINFO_PRIVATE, &shared_request_ptr_pointer);
             curl_multi_remove_handle(m_cmh, easy_handle);
 
-            raw_request_handle_ptr->setCompletionStatus(easy_result);
-            raw_request_handle_ptr->onComplete(*this, *raw_request_handle_ptr->getSharedRequestPointer());
+            auto shared_request_ptr = *shared_request_ptr_pointer;
+            
+            shared_request_ptr->GetAsReference().setCompletionStatus(easy_result);
+            shared_request_ptr->GetAsReference().onComplete(*this, shared_request_ptr);
 
             --m_active_request_count;
         }
@@ -417,6 +420,32 @@ auto requests_accept_async(uv_async_t* handle) -> void
 
     for (auto& request_handle : event_loop->m_grabbed_requests) {
         auto& raw_request = *request_handle;
+        
+        if (const auto& request_timeout_opt = raw_request.GetRequestTimeout(); request_timeout_opt.has_value())
+        {
+            auto time = uv_now(event_loop->m_loop);
+            const auto request_timeout = request_timeout_opt.value();
+            auto next_timepoint = time + static_cast<uint64_t>(request_timeout.count());
+        
+            auto& wrappers = event_loop->m_request_timeout_wrappers;
+            if (wrappers.empty() || next_timepoint < wrappers.begin()->GetData().m_timeout_time)
+            {
+                uv_timer_stop(&event_loop->m_request_timer);
+            
+                uv_timer_start(
+                    &event_loop->m_request_timer,
+                    times_up,
+                    static_cast<uint64_t>(request_timeout.count()),
+                    0);
+            }
+        
+            auto iterator = event_loop->m_request_timeout_wrappers.emplace(next_timepoint, request_handle.createSharedRequestOnHeap());
+            request_handle->setTimeoutIterator(iterator);
+        }
+    
+        // Put the shared_ptr to the SharedRequest on the heap and set curl handle's data to point to the pointer
+        raw_request.setSharedPointerOnCurlHandle(request_handle.createSharedRequestOnHeap());
+        
         auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request.m_curl_handle);
     
         if(curl_code != CURLM_OK && curl_code != CURLM_CALL_MULTI_PERFORM)
@@ -430,27 +459,7 @@ auto requests_accept_async(uv_async_t* handle) -> void
         }
         else
         {
-            if (const auto& request_timeout_opt = raw_request.GetRequestTimeout(); request_timeout_opt.has_value())
-            {
-                auto time = uv_now(event_loop->m_loop);
-                const auto request_timeout = request_timeout_opt.value();
-                auto next_timepoint = time + static_cast<uint64_t>(request_timeout.count());
-        
-                auto& wrappers = event_loop->m_request_timeout_wrappers;
-                if (wrappers.empty() || next_timepoint < wrappers.begin()->GetData().m_timeout_time)
-                {
-                    uv_timer_stop(&event_loop->m_request_timer);
             
-                    uv_timer_start(
-                        &event_loop->m_request_timer,
-                        times_up,
-                        static_cast<uint64_t>(request_timeout.count()),
-                        0);
-                }
-        
-                auto iterator = event_loop->m_request_timeout_wrappers.emplace(next_timepoint, request_handle.createSharedRequestOnHeap());
-                request_handle->setTimeoutIterator(iterator);
-            }
             
             /**
              * Immediately call curl's check action to get the current request moving.
@@ -458,13 +467,6 @@ auto requests_accept_async(uv_async_t* handle) -> void
              * drop requests.
              */
             event_loop->checkActions();
-
-            /**
-             * Drop the unique_ptr safety around the RequestHandle while it is being
-             * processed by curl.  When curl is finished completing the request
-             * it will be put back into a Request object for the client to use.
-             */
-            raw_request.setSharedRequestPointer(request_handle.createSharedRequestOnHeap());
         }
     }
     

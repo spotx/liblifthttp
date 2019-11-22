@@ -32,8 +32,6 @@ Request::Request(
     , m_request_pool(request_pool)
     , m_max_download_bytes(max_download_bytes)
 {
-    static uint64_t id = 0;
-    m_id = ++id;
     init();
     SetUrl(url);
     SetConnectionTimeout(connection_time);
@@ -57,7 +55,6 @@ Request::~Request()
 
 auto Request::init() -> void
 {
-    curl_easy_setopt(m_curl_handle, CURLOPT_PRIVATE, this);
     curl_easy_setopt(m_curl_handle, CURLOPT_HEADERFUNCTION, curl_write_header);
     curl_easy_setopt(m_curl_handle, CURLOPT_HEADERDATA, this);
     curl_easy_setopt(m_curl_handle, CURLOPT_WRITEFUNCTION, curl_write_data);
@@ -74,6 +71,11 @@ auto Request::init() -> void
     m_response_headers.reserve(HEADER_DEFAULT_MEMORY_BYTES);
     m_response_headers_idx.reserve(HEADER_DEFAULT_COUNT);
     m_response_data.reserve(HEADER_DEFAULT_MEMORY_BYTES);
+}
+
+auto Request::setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void
+{
+    curl_easy_setopt(m_curl_handle, CURLOPT_PRIVATE, shared_request);
 }
 
 auto Request::SetOnCompleteHandler(
@@ -389,7 +391,6 @@ auto Request::SetAcceptAllEncoding() -> void
 
 auto Request::Reset() -> void
 {
-    std::cout << "Resetting " << m_id << std::endl;
     m_url = std::string_view {};
     m_request_headers.clear();
     m_request_headers_idx.clear();
@@ -502,7 +503,6 @@ auto Request::setCompletionStatus(
 
 auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout) -> void
 {
-    // RequestHandle needs to be constructed from SharedRequest
     auto request_handle_ptr = RequestHandle(std::move(shared_request));
     
     // We only call the stored on complete function once!
@@ -523,18 +523,6 @@ auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> s
         // Call the on complete handler with a reference to the request.
         m_on_complete_handler(std::move(request_handle_ptr));
     }
-    // else
-    // {
-    //     // We've already called the callback once, don't do it again, just get the shared request, so it can destruct.
-    //     if (auto* shared_request_ptr = getSharedRequestPointer(); shared_request_ptr != nullptr)
-    //     {
-    //         std::unique_ptr<std::shared_ptr<SharedRequest>> shared_request{shared_request_ptr};
-    //     }
-    //     else
-    //     {
-    //         std::cout << "Tried to get shared pointer for second call back but it was null." << std::endl;
-    //     }
-    // }
 }
 
 auto Request::getRemainingDownloadBytes() -> ssize_t

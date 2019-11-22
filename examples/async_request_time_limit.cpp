@@ -11,7 +11,7 @@ static uint64_t response_count{0};
 static auto on_complete(lift::RequestHandle request_ptr) -> void
 {
     auto& request = *request_ptr;
-    std::cout << "For request id " << request.m_id << " with url " << request.GetUrl() << ", ";
+    std::cout << "For request with url " << request.GetUrl() << ", ";
     if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         ++response_count;
         std::cout << "requested was successfully completed in " << request.GetTotalTime().count() << " ms" << std::endl;
@@ -61,7 +61,6 @@ int main(int argc, char* argv[])
             lift::RequestHandle request = request_pool.Produce(new_url, on_complete, 2'000ms, timeout_time);
             event_loop.StartRequest(std::move(request));
         }
-        
     } // So we wait until the event loop destructs automatically
     
     std::cout << "Timeout count " << timeout_count << std::endl;

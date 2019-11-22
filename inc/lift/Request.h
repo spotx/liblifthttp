@@ -271,8 +271,6 @@ public:
      * Resets the request to be re-used.  This will clear everything on the request.
      */
     auto Reset() -> void;
-
-    uint64_t m_id{0};
 private:
     /**
      * Private constructor -- only the RequestPool can create new Requests.
@@ -296,20 +294,7 @@ private:
 
     auto init() -> void;
     
-    auto getSharedRequestPointer() -> std::shared_ptr<SharedRequest>*
-    {
-        return m_shared_request_ptr;
-    }
-    
-    auto setSharedRequestPointer(std::shared_ptr<SharedRequest>* shared_request_ptr) -> void
-    {
-        if (m_shared_request_ptr != nullptr)
-        {
-            static uint64_t count = 0;
-            std::cout << "Count " << ++count << " of overwriting!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
-        }
-        m_shared_request_ptr = shared_request_ptr;
-    }
+    auto setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void;
 
     /// The onComplete() handler for asynchronous requests.
     std::function<void(RequestHandle)> m_on_complete_handler;
@@ -445,7 +430,7 @@ private:
          */
         uint64_t m_timeout_time;
         /// Reference to the Request associated with this wrapper.
-        std::shared_ptr<SharedRequest>* m_request;
+        std::shared_ptr<SharedRequest>* m_shared_request_ptr_pointer;
     } m_data;
 public:
     RequestTimeoutWrapper(uint64_t timeout_time, std::shared_ptr<SharedRequest>* request) : m_data{timeout_time, request} {}

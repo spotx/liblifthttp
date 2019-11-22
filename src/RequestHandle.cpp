@@ -12,12 +12,13 @@ RequestHandle::RequestHandle(
 {}
 
 RequestHandle::RequestHandle(std::shared_ptr<SharedRequest> shared_request)
-    : m_shared_request(std::move(shared_request)) {}
+    : m_shared_request(std::move(shared_request))
+{}
 
 auto RequestHandle::createSharedRequestOnHeap() const -> std::shared_ptr<SharedRequest>*
 {
-    auto* result = new std::shared_ptr<SharedRequest>(m_shared_request);
-    return result;
+    // Static cast to actual pointer type to silence cppcoreguidelines-owning-memory warning.
+    return static_cast<std::shared_ptr<SharedRequest>*>(new std::shared_ptr<SharedRequest>(m_shared_request));
 }
 
 auto RequestHandle::operator*() -> Request&

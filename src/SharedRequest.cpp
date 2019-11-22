@@ -5,38 +5,23 @@
 namespace lift
 {
 
+SharedRequest::SharedRequest(RequestPool* request_pool, std::unique_ptr<Request> request_handle)
+    : m_request_pool(request_pool), m_request(std::move(request_handle))
+{
+}
+
 SharedRequest::~SharedRequest()
 {
     /**
      * Only move the request handle into the pool if this is the 'valid'
      * request object that still owns the data.
      */
-    if (m_request_handle != nullptr && m_request_pool != nullptr)
+    if (m_request != nullptr && m_request_pool != nullptr)
     {
-        m_request_pool->returnRequest(std::move(m_request_handle));
+        m_request_pool->returnRequest(std::move(m_request));
         m_request_pool = nullptr;
-        m_request_handle = nullptr;
+        m_request = nullptr;
     }
-}
-
-auto SharedRequest::GetAsReference() -> Request&
-{
-    return *m_request_handle;
-}
-
-auto SharedRequest::GetAsReference() const -> const Request&
-{
-    return *m_request_handle;
-}
-
-auto SharedRequest::GetAsPointer() -> Request*
-{
-    return m_request_handle.get();
-}
-
-auto SharedRequest::GetAsPointer() const -> const Request*
-{
-    return m_request_handle.get();
 }
 
 }
