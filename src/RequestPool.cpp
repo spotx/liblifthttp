@@ -5,7 +5,7 @@ namespace lift {
 auto RequestPool::Reserve(
     size_t count) -> void
 {
-    std::lock_guard<std::mutex> guard { m_lock };
+    std::lock_guard<std::mutex> guard { m_mutex };
     for (size_t i = 0; i < count; ++i) {
         // All these fields will get reset on Produce().
         auto request_handle_ptr = std::unique_ptr<Request>(
@@ -20,21 +20,21 @@ auto RequestPool::Reserve(
 }
 
 auto RequestPool::Produce(
-    std::string_view url) -> RequestHandle
+    const std::string& url) -> RequestHandle
 {
     using namespace std::chrono_literals;
     return Produce(url, nullptr, 0ms);
 }
 
 auto RequestPool::Produce(
-    std::string_view url,
+    const std::string& url,
     std::chrono::milliseconds connection_timeout) -> RequestHandle
 {
     return Produce(url, nullptr, connection_timeout);
 }
 
 auto RequestPool::Produce(
-    std::string_view url,
+    const std::string& url,
     std::function<void(RequestHandle)> on_complete_handler,
     std::chrono::milliseconds connection_timeout) -> RequestHandle
 {
@@ -42,7 +42,7 @@ auto RequestPool::Produce(
 }
 
 auto RequestPool::Produce(
-    std::string_view url,
+    const std::string& url,
     std::chrono::milliseconds connection_timeout,
     std::chrono::milliseconds response_wait_time) -> RequestHandle
 {
@@ -51,16 +51,15 @@ auto RequestPool::Produce(
 
 
 auto RequestPool::Produce(
-    std::string_view url,
+    const std::string& url,
     std::function<void(RequestHandle)> on_complete_handler,
     std::chrono::milliseconds connection_timeout,
     std::optional<std::chrono::milliseconds> response_wait_time) -> RequestHandle
 {
-
-    m_lock.lock();
+    std::unique_lock lock{m_mutex};
     
     if (m_requests.empty()) {
-        m_lock.unlock();
+        lock.unlock();
         
         // Cannot use std::make_unique here since Request ctor is private friend.
         auto request_handle_ptr = std::unique_ptr<Request> {
@@ -72,17 +71,17 @@ auto RequestPool::Produce(
                 std::move(on_complete_handler) }
         };
         
-        return RequestHandle { this, std::move(request_handle_ptr) };
+        return RequestHandle { *this, std::move(request_handle_ptr) };
     } else {
         auto request_handle_ptr = std::move(m_requests.back());
         m_requests.pop_back();
-        m_lock.unlock();
+        lock.unlock();
         
         request_handle_ptr->SetOnCompleteHandler(std::move(on_complete_handler));
         request_handle_ptr->SetUrl(url);
         request_handle_ptr->SetConnectionTimeout(connection_timeout);
         
-        return RequestHandle { this, std::move(request_handle_ptr) };
+        return RequestHandle { *this, std::move(request_handle_ptr) };
     }
 }
 
@@ -91,7 +90,7 @@ auto RequestPool::returnRequest(
 {
     request->Reset(); // Reset the request if it is returned to the pool.
     {
-        std::lock_guard<std::mutex> guard { m_lock };
+        std::lock_guard<std::mutex> guard { m_mutex };
         m_requests.emplace_back(std::move(request));
     }
 }

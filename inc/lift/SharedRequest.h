@@ -10,7 +10,7 @@ class Request;
 class SharedRequest
 {
 public:
-    SharedRequest(RequestPool* request_pool, std::unique_ptr<Request> request_handle);
+    SharedRequest(RequestPool& request_pool, std::unique_ptr<Request> request_handle);
     SharedRequest(const SharedRequest&) = delete;
     SharedRequest(SharedRequest&&) = delete;
     auto operator=(const SharedRequest&) = delete;
@@ -32,7 +32,7 @@ public:
     /** @} */
 private:
     /// The request pool that owns this request.
-    RequestPool* m_request_pool;
+    RequestPool& m_request_pool;
     
     /// The actual underlying request object.
     std::unique_ptr<Request> m_request;

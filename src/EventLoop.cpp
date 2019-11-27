@@ -165,18 +165,10 @@ auto EventLoop::Stop() -> void
     m_is_stopping = true;
 }
 
-static auto has_pending_requests(std::mutex& mutex, const std::vector<RequestHandle>& pending_requests) -> bool
+auto EventLoop::HasUnfinishedRequests() const -> bool
 {
-    std::unique_lock lock{mutex};
-    return !pending_requests.empty();
-}
-
-auto EventLoop::HasUnfinishedRequests() -> bool
-{
-    return (
-           (m_active_request_count.load() > 0)
-        || has_pending_requests(m_pending_requests_lock, m_pending_requests)
-    );
+    std::unique_lock lock{m_pending_requests_lock};
+    return ((m_active_request_count.load() > 0) || !m_pending_requests.empty());
 }
 
 auto EventLoop::GetRequestPool() -> RequestPool&
@@ -222,13 +214,13 @@ auto EventLoop::stopTimedOutRequests() -> void
         // itself up at the end of this method.
         auto& data = current_wrapper->GetData();
         auto shared_request = std::unique_ptr<std::shared_ptr<SharedRequest>>(data.m_shared_request_ptr_pointer);
-        
+    
+        // Update current_wrapper with the result of removing the wrapper from the multiset
+        current_wrapper = removeTimeoutByIterator(current_wrapper);
+    
         // Call onComplete on the underlying Request object, copying in the shared_pointer
         // so we get a correct reference count.
         (**shared_request).GetAsReference().onComplete(*this, *shared_request, true);
-        
-        // Update current_wrapper with the result of removing the wrapper from the multiset
-        current_wrapper = removeTimeoutByIterator(current_wrapper);
     }
     
     // If there are still items in the multiset, get the first item and use its time to reset the request timer.
@@ -247,12 +239,11 @@ auto EventLoop::stopTimedOutRequests() -> void
 
 auto EventLoop::removeTimeoutByIterator(std::multiset<ResponseWaitTimeWrapper>::iterator request_to_remove) -> std::multiset<ResponseWaitTimeWrapper>::iterator
 {
-    // Get the shared pointer to SharedRequest into a unique pointer so it cleans itself up.
-    auto request_ptr = *request_to_remove->GetData().m_shared_request_ptr_pointer;
-    auto shared_request = std::make_unique<const std::shared_ptr<SharedRequest>>(request_ptr);
+    // Get a reference to the SharedRequest pointed to by the shared pointer.
+    auto& shared_request = **request_to_remove->GetData().m_shared_request_ptr_pointer;
     
     // Reset the iterator stored on the Request so it can't be reused.
-    (*shared_request)->GetAsPointer()->m_response_wait_time_set_iterator.reset();
+    shared_request.GetAsReference().m_response_wait_time_set_iterator.reset();
     
     return m_response_wait_time_wrappers.erase(request_to_remove);
 }
@@ -442,6 +433,8 @@ auto requests_accept_async(uv_async_t* handle) -> void
         std::lock_guard<std::mutex> guard { event_loop->m_pending_requests_lock };
         // swap so we can release the lock as quickly as possible
         event_loop->m_grabbed_requests.swap(event_loop->m_pending_requests);
+        // Add size of grabbed requests to active request count now HasUnfinishedRequests can return accurately.
+        event_loop->m_active_request_count += event_loop->m_grabbed_requests.size();
     }
 
     for (auto& request_handle : event_loop->m_grabbed_requests)
@@ -476,9 +469,8 @@ auto requests_accept_async(uv_async_t* handle) -> void
             request_handle->setTimeoutIterator(iterator);
         }
     
-        // Put the shared_ptr to the SharedRequest on the heap and set curl handle's data to point to the pointer,
-        // so its lifetime is maintained even after exiting this function
-        raw_request.setSharedPointerOnCurlHandle(request_handle.createSharedRequestOnHeap());
+        // Create a shared_ptr to the SharedRequest on the heap so its lifetime is maintained after exiting this function.
+        auto* shared_request_on_heap = request_handle.createSharedRequestOnHeap();
         
         auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request.m_curl_handle);
     
@@ -489,11 +481,15 @@ auto requests_accept_async(uv_async_t* handle) -> void
              * immediately.
              */
             request_handle->setCompletionStatus(CURLcode::CURLE_SEND_ERROR);
-            request_handle->onComplete(*event_loop, *request_handle.createSharedRequestOnHeap());
+
+            // If we are calling onComplete now, move the shared_ptr into the method so it cleans itself up correctly.
+            request_handle->onComplete(*event_loop, std::move(*shared_request_on_heap));
         }
         else
         {
-            
+            // We are going to wait for a response, so we need to set pointer to the shared pointer on the request
+            // so we can get it back later in checkActions.
+            raw_request.setSharedPointerOnCurlHandle(shared_request_on_heap);
             
             /**
              * Immediately call curl's check action to get the current request moving.
@@ -504,7 +500,6 @@ auto requests_accept_async(uv_async_t* handle) -> void
         }
     }
     
-    event_loop->m_active_request_count += event_loop->m_grabbed_requests.size();
     event_loop->m_grabbed_requests.clear();
 }
 

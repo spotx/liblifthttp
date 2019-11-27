@@ -23,8 +23,8 @@ target_include_directories(lift_async_simple SYSTEM PRIVATE ${CURL_INCLUDE})
 
 ### async_response_time_limit ###
 set(ASYNC_RESPONSE_TIME_LIMIT_SOURCE_FILES
-        examples/async_response_time_limit.cpp
-        )
+    examples/async_response_time_limit.cpp
+)
 add_executable(lift_async_response_time_limit ${ASYNC_RESPONSE_TIME_LIMIT_SOURCE_FILES})
 target_link_libraries(lift_async_response_time_limit PRIVATE lifthttp ${LIFT_CURL_LIBRARY_DEPENDENCIES} ${LIFT_SYSTEM_LIBRARY_DEPENDENCIES})
 target_compile_features(lift_async_response_time_limit PRIVATE cxx_std_17)

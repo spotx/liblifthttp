@@ -23,7 +23,7 @@ static constexpr uint64_t HEADER_DEFAULT_COUNT = 16;
 
 Request::Request(
     RequestPool& request_pool,
-    std::string_view url,
+    const std::string& url,
     std::chrono::milliseconds connection_time,
     std::optional<std::chrono::milliseconds> response_wait_time,
     std::function<void(RequestHandle)> on_complete_handler,
@@ -79,7 +79,7 @@ auto Request::SetOnCompleteHandler(
     m_on_complete_handler = std::move(on_complete_handler);
 }
 
-auto Request::SetUrl(std::string_view url) -> bool
+auto Request::SetUrl(const std::string& url) -> bool
 {
     if (url.empty()) {
         return false;
@@ -356,7 +356,7 @@ auto Request::SetVerifySSLHost(bool verify) -> void
     {
         // Re CURL docs (https://curl.haxx.se/libcurl/c/CURLOPT_SSL_VERIFYHOST.html),
         // depending on the version of curl used, setting CURLOPT_SSL_VERIFYHOST to 1L vs 2L will
-        // have different results. To maintain forwards and backwards compatability, using 2L
+        // have different results. To maintain forwards and backwards compatibility, using 2L
         curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYHOST, 2L);
     }
     else
@@ -492,16 +492,10 @@ auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> s
     // We only call the stored on complete function once!
     if (!m_on_complete_has_been_called.exchange(true, std::memory_order_acquire))
     {
-        // If the request did not time out and we have an iterator, remove it from the set so we won't try to call
-        // onComplete again.
-        if (!response_wait_time_timeout && m_response_wait_time_set_iterator.has_value())
-        {
-            event_loop.removeTimeoutByIterator(m_response_wait_time_set_iterator.value());
-        }
-        else if (response_wait_time_timeout)
+        if (response_wait_time_timeout)
         {
             // But if the request did time out, set the on complete handler will know.
-            m_status_code = RequestStatus::REQUEST_TIMEOUT;
+            m_status_code = RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT;
         }
         
         if (m_on_complete_handler != nullptr)
@@ -509,6 +503,12 @@ auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> s
             // Call the on complete handler with a reference to the request.
             m_on_complete_handler(std::move(request_handle_ptr));
         }
+    }
+    
+    // If we have an iterator, remove it from the set so we won't try to time it out and then call onComplete again.
+    if (m_response_wait_time_set_iterator.has_value())
+    {
+        event_loop.removeTimeoutByIterator(m_response_wait_time_set_iterator.value());
     }
 }
 

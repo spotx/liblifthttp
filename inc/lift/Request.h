@@ -53,7 +53,7 @@ public:
      * @param url The URL of the HTTP request.
      * @return True if the url was set.
      */
-    auto SetUrl(std::string_view url) -> bool;
+    auto SetUrl(const std::string& url) -> bool;
 
     /**
      * @return The currently set URL for this HTTP request.
@@ -257,13 +257,13 @@ public:
     
     /**
      * Set the verify behavior of the CURLOPT_SSL_VERIFYPEER on the curl_handle
-     * @param verify the verify value to set the CURLOPT_SSL_VERIFYPEER option to
+     * @param verify Bool indicating whether we should require cURL to verify the SSL peer (true) or not (false)
      */
     auto SetVerifySSLPeer(bool verify) -> void;
 
     /**
      * Set the verify behavior of the CURLOPT_SSL_VERIFYHOST on the curl_handle
-     * @param verify the verify value to set the CURLOPT_SSL_VERIFYHOST option to
+     * @param verify Bool indicating whether we should require cURL to verify the SSL host (true) or not (false)
      */
     auto SetVerifySSLHost(bool verify) -> void;
     
@@ -288,12 +288,14 @@ private:
      * @param response_wait_time Optional chrono milliseconds that indicate the maximum time to wait before
      *          calling the on complete callback -- the request will still wait for the connection to
      *          return until the connection_timeout, but the Request will no longer be accessible.
+     *          If response_wait_time does not have a value, only connection_timeout is used and the functionality
+     *          around response_wait_time will not be used.
      * @param on_complete_handler   Function to be called when the CURL request finishes.
      * @param max_download_bytes    The maximum number of bytes to download, if -1, will download entire file.
      */
     explicit Request(
         RequestPool& request_pool,
-        std::string_view url,
+        const std::string& url,
         std::chrono::milliseconds connection_timeout,
         std::optional<std::chrono::milliseconds> response_wait_time,
         std::function<void(RequestHandle)> on_complete_handler = nullptr,
@@ -311,7 +313,7 @@ private:
     CURL* m_curl_handle { curl_easy_init() };
 
     /// A view into the curl url.
-    std::string_view m_url {};
+    std::string_view m_url;
     /// The request headers.
     std::string m_request_headers {};
     /// The request headers index.  Used to generate the curl slist.
@@ -346,7 +348,8 @@ private:
     std::atomic_bool m_on_complete_has_been_called{false};
     /**
      * Optional milliseconds indicating the response wait time for the request. If it is set, the request's
-     * on complete handler will be called even if it has received a response with an error status set.
+     * on complete handler will be called even if we have not received a response and the status code will be
+     * set to indicate a response wait time timeout.
      */
     std::optional<std::chrono::milliseconds> m_response_wait_time;
     
@@ -379,7 +382,9 @@ private:
     
     /**
      * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
-     *          response wait times can be removed from the multiset of RequestTimeoutWrappers)
+     *          response wait times can be removed from the multiset of ResponseWaitTimeWrapper)
+     * @param shared_request Shared pointer to the SharedRequest that owns this Request, so it can be used to create
+     *          a RequestHandle and return the Request to the RequestPool if necessary.
      * @param response_wait_time_timeout Bool indicating whether or not onComplete was called because
      *          a response wait time was exceeded (true) or not (false)
      */
@@ -392,7 +397,7 @@ private:
     auto getRemainingDownloadBytes() -> ssize_t;
     
     /**
-     * @param set_location The iterator from the set of RequestTimeoutWrappers used to "time out"
+     * @param set_location The iterator from the set of ResponseWaitTimeWrapper used to "time out"
      * requests who have not received their responses within the response wait time.
      */
     auto setTimeoutIterator(std::multiset<ResponseWaitTimeWrapper>::iterator set_location) -> void
@@ -459,7 +464,7 @@ public:
     auto GetData() const -> const Data& { return m_data; }
     
     /**
-     * Less than operator used by the multiset of RequestTimeoutWrappers to find the correct slot to insert this into.
+     * Less than operator used by the multiset of ResponseWaitTimeWrapper to find the correct slot to insert this into.
      * @param other Reference to const ResponseWaitTimeWrapper to use for comparison.
      * @return Bool indicating if this wrapper is less than the other wrapper (true) or not (false)
      */

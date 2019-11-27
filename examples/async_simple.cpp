@@ -6,9 +6,9 @@
 #include <string>
 #include <thread>
 
-static auto on_complete(lift::RequestHandle request_ptr) -> void
+static auto on_complete(lift::RequestHandle request_handle) -> void
 {
-    auto& request = *request_ptr;
+    auto& request = *request_handle;
     if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         std::cout
             << "Completed " << request.GetUrl()

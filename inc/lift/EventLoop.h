@@ -51,7 +51,7 @@ public:
      * @return Gets the number of active HTTP requests currently running.
      */
     [[nodiscard]]
-    auto HasUnfinishedRequests() -> bool;
+    auto HasUnfinishedRequests() const -> bool;
 
     /**
      * @return The request pool for this EventLoop.
@@ -107,7 +107,7 @@ private:
     CURLM* m_cmh { curl_multi_init() };
 
     /// Pending requests are safely queued via this lock.
-    std::mutex m_pending_requests_lock {};
+    mutable std::mutex m_pending_requests_lock{};
     /**
      * Pending requests are stored in this vector until they are picked up on the next
      * uv loop iteration.  Any memory accesses to this object should first acquire the
@@ -135,10 +135,10 @@ private:
     std::atomic<bool> m_request_timer_closed { false };
     
     /**
-     * multiset containing RequestTimeoutWrappers, where each item holds a timepoint indicating when it should be
+     * multiset containing ResponseWaitTimeWrapper, where each item holds a timepoint indicating when it should be
      * timed out and a pointer to a shared pointer to a SharedRequest, so the shared pointer to the SharedRequest
      * can live on the heap.
-     * A multiset is used so that multiple RequestTimeoutWrappers with the same timepoint can be stored.
+     * A multiset is used so that multiple ResponseWaitTimeWrapper with the same timepoint can be stored.
      */
     std::multiset<ResponseWaitTimeWrapper> m_response_wait_time_wrappers;
 
@@ -169,7 +169,7 @@ private:
      * Helper method to erase a ResponseWaitTimeWrapper object from the multiset using an iterator from the set.
      * @param request_to_remove Iterator to erase from the multiset
      * @return The next iterator in the multiset (this is returned from erase), so that we can loop through
-     *          the multiset and erase items as we god.
+     *          the multiset and erase items as we go.
      */
     auto removeTimeoutByIterator(std::multiset<ResponseWaitTimeWrapper>::iterator request_to_remove) -> std::multiset<ResponseWaitTimeWrapper>::iterator;
     
@@ -270,7 +270,7 @@ private:
     
     /**
      * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
-     *          response wait times can be removed from the multiset of RequestTimeoutWrappers)
+     *          response wait times can be removed from the multiset of ResponseWaitTimeWrapper)
      * @param response_wait_time_timeout Bool indicating whether or not onComplete was called because
      *          a response wait time was exceeded (true) or not (false)
      */

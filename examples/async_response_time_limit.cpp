@@ -8,9 +8,9 @@
 static uint64_t timeout_count{0};
 static uint64_t response_count{0};
 
-static auto on_complete(lift::RequestHandle request_ptr) -> void
+static auto on_complete(lift::RequestHandle request_handle) -> void
 {
-    auto& request = *request_ptr;
+    auto& request = *request_handle;
     std::cout << "For request with url " << request.GetUrl() << ", ";
     if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         ++response_count;
@@ -18,8 +18,7 @@ static auto on_complete(lift::RequestHandle request_ptr) -> void
         std::cout << "Received response body was: " << request.GetResponseData() << std::endl;
     } else {
         ++timeout_count;
-        std::cout << "request was not successfully completed, with error: " << lift::to_string(request.GetCompletionStatus()) << std::endl;
-        std::cout << "Received response body was: " << request.GetResponseData() << std::endl;
+        std::cout << "request was not successfully completed, with error: " << to_string(request.GetCompletionStatus()) << std::endl;
     }
 }
 

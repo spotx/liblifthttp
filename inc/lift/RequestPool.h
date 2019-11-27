@@ -42,7 +42,7 @@ public:
      * @return A request object setup for the URL.
      */
     auto Produce(
-        std::string_view url) -> RequestHandle;
+        const std::string& url) -> RequestHandle;
 
     /**
      * Produces a new Request with the specified connection_timeout.
@@ -55,7 +55,7 @@ public:
      * @return A Request object setup for the URL + Timeout.
      */
     auto Produce(
-        std::string_view url,
+        const std::string& url,
         std::chrono::milliseconds connection_timeout) -> RequestHandle;
 
     /**
@@ -70,7 +70,7 @@ public:
      * @return A Request object setup for the URL + Timeout.
      */
     auto Produce(
-        std::string_view url,
+        const std::string& url,
         std::function<void(RequestHandle)> on_complete_handler,
         std::chrono::milliseconds connection_timeout) -> RequestHandle;
     
@@ -88,7 +88,7 @@ public:
      * @return A Request object setup for the URL + Timeout.
      */
     auto Produce(
-        std::string_view url,
+        const std::string& url,
         std::chrono::milliseconds connection_timeout,
         std::chrono::milliseconds response_wait_time) -> RequestHandle;
     
@@ -107,14 +107,14 @@ public:
      * @return A Request object setup for the URL + Timeout.
      */
     auto Produce(
-        std::string_view url,
+        const std::string& url,
         std::function<void(RequestHandle)> on_complete_handler,
         std::chrono::milliseconds connection_timeout,
         std::optional<std::chrono::milliseconds> response_wait_time) -> RequestHandle;
     
 private:
     /// Used for thread safe calls.
-    std::mutex m_lock {};
+    std::mutex m_mutex {};
     /// Pool of un-used Request handles.
     std::deque<std::unique_ptr<Request>> m_requests {};
 

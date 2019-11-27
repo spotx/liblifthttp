@@ -39,7 +39,7 @@ public:
 
 private:
     RequestHandle(
-        RequestPool* request_pool,
+        RequestPool& request_pool,
         std::unique_ptr<Request> request_handle);
     
     explicit RequestHandle(std::shared_ptr<SharedRequest> shared_request);

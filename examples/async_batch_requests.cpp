@@ -6,9 +6,9 @@
 #include <string>
 #include <thread>
 
-static auto on_complete(lift::RequestHandle request_ptr) -> void
+static auto on_complete(lift::RequestHandle request_handle) -> void
 {
-    auto& request = *request_ptr;
+    auto& request = *request_handle;
     switch (request.GetCompletionStatus()) {
     case lift::RequestStatus::SUCCESS:
         std::cout
@@ -27,7 +27,7 @@ static auto on_complete(lift::RequestHandle request_ptr) -> void
     case lift::RequestStatus::TIMEOUT:
         std::cout << "Timeout: " << request.GetUrl() << std::endl;
         break;
-    case lift::RequestStatus::REQUEST_TIMEOUT:
+    case lift::RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT:
         std::cout << "Request Timeout: " << request.GetUrl() << std::endl;
         break;
     case lift::RequestStatus::RESPONSE_EMPTY:

@@ -6,7 +6,7 @@
 namespace lift {
 
 RequestHandle::RequestHandle(
-    RequestPool* request_pool,
+    RequestPool& request_pool,
     std::unique_ptr<Request> request_handle)
     : m_shared_request(std::make_shared<SharedRequest>(request_pool, std::move(request_handle)))
 {}

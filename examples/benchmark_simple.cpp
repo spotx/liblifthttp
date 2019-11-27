@@ -33,26 +33,17 @@ static auto print_stats(
 static std::atomic<uint64_t> g_success { 0 };
 static std::atomic<uint64_t> g_error { 0 };
 
-static auto on_complete(lift::RequestHandle request_ptr, lift::EventLoop& event_loop) -> void
+static auto on_complete(lift::RequestHandle request_handle, lift::EventLoop& event_loop) -> void
 {
-    auto& request = *request_ptr;
+    auto& request = *request_handle;
     if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         ++g_success;
     } else {
         ++g_error;
     }
     
-    using namespace std::chrono_literals;
-    auto new_request = event_loop.GetRequestPool().Produce(
-        request.GetUrl(),
-        [&event_loop](lift::RequestHandle r) {
-            on_complete(std::move(r), event_loop);
-        },
-        1s);
-    request.SetFollowRedirects(false);
-    request.AddHeader("Connection", "Keep-Alive");
     // And request again until we are shutting down.
-    event_loop.StartRequest(std::move(new_request));
+    event_loop.StartRequest(std::move(request_handle));
 }
 
 int main(int argc, char* argv[])
