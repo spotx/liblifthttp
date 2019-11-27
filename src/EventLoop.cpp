@@ -465,12 +465,12 @@ auto requests_accept_async(uv_async_t* handle) -> void
                     0);
             }
         
-            auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint, request_handle.createSharedRequestOnHeap());
+            auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint, request_handle.createSharedRequestOnHeap().release());
             request_handle->setTimeoutIterator(iterator);
         }
     
         // Create a shared_ptr to the SharedRequest on the heap so its lifetime is maintained after exiting this function.
-        auto* shared_request_on_heap = request_handle.createSharedRequestOnHeap();
+        auto shared_request_on_heap = request_handle.createSharedRequestOnHeap();
         
         auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request.m_curl_handle);
     
@@ -489,7 +489,7 @@ auto requests_accept_async(uv_async_t* handle) -> void
         {
             // We are going to wait for a response, so we need to set pointer to the shared pointer on the request
             // so we can get it back later in checkActions.
-            raw_request.setSharedPointerOnCurlHandle(shared_request_on_heap);
+            raw_request.setSharedPointerOnCurlHandle(shared_request_on_heap.release());
             
             /**
              * Immediately call curl's check action to get the current request moving.

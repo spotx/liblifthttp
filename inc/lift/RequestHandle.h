@@ -45,7 +45,7 @@ private:
     explicit RequestHandle(std::shared_ptr<SharedRequest> shared_request);
     
     [[nodiscard]]
-    auto createSharedRequestOnHeap() const -> std::shared_ptr<SharedRequest>*;
+    auto createSharedRequestOnHeap() const -> std::unique_ptr<std::shared_ptr<SharedRequest>>;
     
     std::shared_ptr<SharedRequest> m_shared_request;
 
