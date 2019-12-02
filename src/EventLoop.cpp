@@ -213,14 +213,14 @@ auto EventLoop::stopTimedOutRequests() -> void
         // Get the shared pointer out of the ResponseWaitTimeWrapper and into a unique pointer so it cleans
         // itself up at the end of this method.
         auto& data = current_wrapper->GetData();
-        auto shared_request = std::unique_ptr<std::shared_ptr<SharedRequest>>(data.m_shared_request_ptr_pointer);
+        auto shared_request = data.m_shared_request_ptr_pointer;
     
         // Update current_wrapper with the result of removing the wrapper from the multiset
         current_wrapper = removeTimeoutByIterator(current_wrapper);
     
         // Call onComplete on the underlying Request object, copying in the shared_pointer
         // so we get a correct reference count.
-        (**shared_request).GetAsReference().onComplete(*this, *shared_request, true);
+        shared_request->GetAsReference().onComplete(*this, shared_request, true);
     }
     
     // If there are still items in the multiset, get the first item and use its time to reset the request timer.
@@ -240,7 +240,7 @@ auto EventLoop::stopTimedOutRequests() -> void
 auto EventLoop::removeTimeoutByIterator(std::multiset<ResponseWaitTimeWrapper>::iterator request_to_remove) -> std::multiset<ResponseWaitTimeWrapper>::iterator
 {
     // Get a reference to the SharedRequest pointed to by the shared pointer.
-    auto& shared_request = **request_to_remove->GetData().m_shared_request_ptr_pointer;
+    auto& shared_request = *request_to_remove->GetData().m_shared_request_ptr_pointer;
     
     // Reset the iterator stored on the Request so it can't be reused.
     shared_request.GetAsReference().m_response_wait_time_set_iterator.reset();
@@ -465,7 +465,7 @@ auto requests_accept_async(uv_async_t* handle) -> void
                     0);
             }
         
-            auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint, request_handle.createSharedRequestOnHeap().release());
+            auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint, request_handle.createCopyOfSharedRequest());
             request_handle->setTimeoutIterator(iterator);
         }
     

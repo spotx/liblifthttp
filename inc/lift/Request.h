@@ -447,7 +447,7 @@ private:
 class ResponseWaitTimeWrapper
 {
 public:
-    ResponseWaitTimeWrapper(uint64_t timeout_time, std::shared_ptr<SharedRequest>* request) : m_data{timeout_time, request} {}
+    ResponseWaitTimeWrapper(uint64_t timeout_time, std::shared_ptr<SharedRequest> request) : m_data{timeout_time, std::move(request)} {}
     
     struct Data
     {
@@ -457,7 +457,7 @@ public:
          */
         uint64_t m_timeout_time;
         /// Reference to the Request associated with this wrapper.
-        std::shared_ptr<SharedRequest>* m_shared_request_ptr_pointer;
+        std::shared_ptr<SharedRequest> m_shared_request_ptr_pointer;
     };
     
     /**

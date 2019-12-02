@@ -47,6 +47,12 @@ private:
     [[nodiscard]]
     auto createSharedRequestOnHeap() const -> std::unique_ptr<std::shared_ptr<SharedRequest>>;
     
+    [[nodiscard]]
+    auto createCopyOfSharedRequest() const -> std::shared_ptr<SharedRequest>
+    {
+        return m_shared_request;
+    }
+    
     std::shared_ptr<SharedRequest> m_shared_request;
 
     /// Friend so it can release the m_request_handle appropriately.
