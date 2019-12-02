@@ -167,7 +167,7 @@ auto EventLoop::Stop() -> void
 
 auto EventLoop::HasUnfinishedRequests() const -> bool
 {
-    std::unique_lock lock{m_pending_requests_lock};
+    std::unique_lock lock{m_pending_requests_mutex};
     return ((m_active_request_count.load() > 0) || !m_pending_requests.empty());
 }
 
@@ -185,7 +185,7 @@ auto EventLoop::StartRequest(
     // We'll prepare now since it won't block the event loop thread.
     request->prepareForPerform();
     {
-        std::lock_guard<std::mutex> guard { m_pending_requests_lock };
+        std::lock_guard<std::mutex> guard {m_pending_requests_mutex };
         m_pending_requests.emplace_back(std::move(request));
     }
     uv_async_send(&m_async);
@@ -430,7 +430,7 @@ auto requests_accept_async(uv_async_t* handle) -> void
      * to the Request objects on the EventLoop thread.
      */
     {
-        std::lock_guard<std::mutex> guard { event_loop->m_pending_requests_lock };
+        std::lock_guard<std::mutex> guard { event_loop->m_pending_requests_mutex };
         // swap so we can release the lock as quickly as possible
         event_loop->m_grabbed_requests.swap(event_loop->m_pending_requests);
         // Add size of grabbed requests to active request count now HasUnfinishedRequests can return accurately.

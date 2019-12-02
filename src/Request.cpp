@@ -34,7 +34,7 @@ Request::Request(
 {
     init();
     SetUrl(url);
-    SetConnectionTimeout(connection_time);
+    SetCurlTimeout(connection_time);
     if (response_wait_time.has_value())
     {
         SetResponseWaitTime(response_wait_time.value());
@@ -173,9 +173,16 @@ auto Request::SetMaxDownloadBytes(ssize_t max_download_bytes) -> void
     m_bytes_written = 0;
 }
 
-auto Request::SetConnectionTimeout(
+auto Request::SetCurlTimeout(
     std::chrono::milliseconds timeout) -> bool
 {
+    if (m_response_wait_time.has_value() && timeout > m_response_wait_time)
+    {
+        timeout = m_response_wait_time.value();
+    }
+    
+    m_curl_timeout = timeout;
+    
     int64_t timeout_ms = timeout.count();
 
     if (timeout_ms > 0) {
@@ -183,6 +190,16 @@ auto Request::SetConnectionTimeout(
         return (error_code == CURLE_OK);
     }
     return false;
+}
+
+auto Request::SetResponseWaitTime(std::chrono::milliseconds timeout) -> void
+{
+    if (timeout > m_curl_timeout)
+    {
+        timeout = m_curl_timeout;
+    }
+
+    m_response_wait_time.emplace(timeout);
 }
 
 auto Request::SetFollowRedirects(

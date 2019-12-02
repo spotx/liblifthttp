@@ -74,13 +74,15 @@ public:
         http::Version http_version) -> void;
 
     /**
-     * Sets the timeout for this HTTP request.  This should be set before Perform() is called
+     * Sets the full timeout for this HTTP request.  This should be set before Perform() is called
      * or if this is an AsyncRequest before adding to an EventLoop.
+     * NOTE: If you have also set the response wait time, this is the should be longer than than the
+     * response wait time and should be used to keep connections alive. Otherwise, this is the only
+     * timeout that will be used
      * @param timeout The timeout for the request.
      * @return True if the timeout was set.
      */
-    auto SetConnectionTimeout(
-        std::chrono::milliseconds timeout) -> bool;
+    auto SetCurlTimeout(std::chrono::milliseconds timeout) -> bool;
     
     /**
      * Get/set optional chrono milliseconds indicating how long the request has
@@ -95,10 +97,7 @@ public:
         return m_response_wait_time;
     }
     
-    auto SetResponseWaitTime(std::chrono::milliseconds timeout) -> void
-    {
-        m_response_wait_time.emplace(timeout);
-    }
+    auto SetResponseWaitTime(std::chrono::milliseconds timeout) -> void;
     /** @} */
 
     /**
@@ -268,7 +267,7 @@ public:
     auto SetVerifySSLHost(bool verify) -> void;
     
     /**
-     * Tells cURL to using an Accept-Encoding header that includes all built-in
+     * Tells cURL to use an Accept-Encoding header that includes all built-in
      * supported encodings in a comma-separated list.
      * IMPORTANT: Using this is mutually exclusive with adding your own Accept-Encoding header.
      */
@@ -283,8 +282,8 @@ private:
      * Private constructor -- only the RequestPool can create new Requests.
      * @param request_pool The request pool that generated this handle.
      * @param url          The url for the request.
-     * @param connection_timeout The maximum time to wait before quitting, calling the
-     *          on_complete_handler and closing the connection.
+     * @param connection_timeout The maximum time to wait before quitting, calling the on_complete_handler
+     *                           and closing the connection.
      * @param response_wait_time Optional chrono milliseconds that indicate the maximum time to wait before
      *          calling the on complete callback -- the request will still wait for the connection to
      *          return until the connection_timeout, but the Request will no longer be accessible.
@@ -341,11 +340,15 @@ private:
     /// Number of bytes that have been written so far.
     ssize_t m_bytes_written { 0 };
     
+    /// How long the curl request is given before timing out.
+    std::chrono::milliseconds m_curl_timeout;
+    
     /**
      * Bool indicating whether or not onComplete has been called (true) or not (false) so if a request exceeds
      * its response wait time, its on complete handler can be called only once.
      */
     std::atomic_bool m_on_complete_has_been_called{false};
+    
     /**
      * Optional milliseconds indicating the response wait time for the request. If it is set, the request's
      * on complete handler will be called even if we have not received a response and the status code will be
@@ -443,7 +446,9 @@ private:
  */
 class ResponseWaitTimeWrapper
 {
-private:
+public:
+    ResponseWaitTimeWrapper(uint64_t timeout_time, std::shared_ptr<SharedRequest>* request) : m_data{timeout_time, request} {}
+    
     struct Data
     {
         /**
@@ -453,9 +458,7 @@ private:
         uint64_t m_timeout_time;
         /// Reference to the Request associated with this wrapper.
         std::shared_ptr<SharedRequest>* m_shared_request_ptr_pointer;
-    } m_data;
-public:
-    ResponseWaitTimeWrapper(uint64_t timeout_time, std::shared_ptr<SharedRequest>* request) : m_data{timeout_time, request} {}
+    };
     
     /**
      * @return Reference to the const Data struct associated with this wrapper.
@@ -468,10 +471,13 @@ public:
      * @param other Reference to const ResponseWaitTimeWrapper to use for comparison.
      * @return Bool indicating if this wrapper is less than the other wrapper (true) or not (false)
      */
-    auto operator<(const ResponseWaitTimeWrapper& other) const -> bool
+    inline auto operator<(const ResponseWaitTimeWrapper& other) const -> bool
     {
         return m_data.m_timeout_time < other.m_data.m_timeout_time;
     }
+
+private:
+    const Data m_data;
 };
 
 } // namespace lift

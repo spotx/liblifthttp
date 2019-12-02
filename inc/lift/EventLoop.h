@@ -107,11 +107,11 @@ private:
     CURLM* m_cmh { curl_multi_init() };
 
     /// Pending requests are safely queued via this lock.
-    mutable std::mutex m_pending_requests_lock{};
+    mutable std::mutex m_pending_requests_mutex{};
     /**
      * Pending requests are stored in this vector until they are picked up on the next
      * uv loop iteration.  Any memory accesses to this object should first acquire the
-     * m_pending_requests_lock to guarantee thread safety.
+     * m_pending_requests_mutex to guarantee thread safety.
      *
      * Before the EventLoop begins working on the pending requests, it swaps
      * the pending requests vector into the grabbed requests vector -- this is done
@@ -271,6 +271,8 @@ private:
     /**
      * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
      *          response wait times can be removed from the multiset of ResponseWaitTimeWrapper)
+     * @param shared_request Shared pointer to the SharedRequest that owns this Request, so it can be used to create
+     *          a RequestHandle and return the Request to the RequestPool if necessary.
      * @param response_wait_time_timeout Bool indicating whether or not onComplete was called because
      *          a response wait time was exceeded (true) or not (false)
      */

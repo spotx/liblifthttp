@@ -79,7 +79,7 @@ auto RequestPool::Produce(
         
         request_handle_ptr->SetOnCompleteHandler(std::move(on_complete_handler));
         request_handle_ptr->SetUrl(url);
-        request_handle_ptr->SetConnectionTimeout(connection_timeout);
+        request_handle_ptr->SetCurlTimeout(connection_timeout);
         
         return RequestHandle { *this, std::move(request_handle_ptr) };
     }
