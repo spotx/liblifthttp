@@ -14,7 +14,7 @@ SharedRequest::~SharedRequest()
 {
     /**
      * On destruction, we return the Request object back to the pool so it can be reused.
-     * Because SharedRequest is always stored in an shared pointer, this allows us to ensure
+     * Because SharedRequest is always stored in a shared pointer, this allows us to ensure
      * that the request will only be returned to the pool when all references to it have gone away.
      *
      * This is a concern in cases where we have a timeout due to response wait time -- it is
