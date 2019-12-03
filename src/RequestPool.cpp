@@ -28,32 +28,32 @@ auto RequestPool::Produce(
 
 auto RequestPool::Produce(
     const std::string& url,
-    std::chrono::milliseconds connection_timeout) -> RequestHandle
+    std::chrono::milliseconds curl_timeout) -> RequestHandle
 {
-    return Produce(url, nullptr, connection_timeout);
+    return Produce(url, nullptr, curl_timeout);
 }
 
 auto RequestPool::Produce(
     const std::string& url,
     std::function<void(RequestHandle)> on_complete_handler,
-    std::chrono::milliseconds connection_timeout) -> RequestHandle
+    std::chrono::milliseconds curl_timeout) -> RequestHandle
 {
-    return Produce(url, std::move(on_complete_handler), connection_timeout, std::nullopt);
+    return Produce(url, std::move(on_complete_handler), curl_timeout, std::nullopt);
 }
 
 auto RequestPool::Produce(
     const std::string& url,
-    std::chrono::milliseconds connection_timeout,
+    std::chrono::milliseconds curl_timeout,
     std::chrono::milliseconds response_wait_time) -> RequestHandle
 {
-    return Produce(url, nullptr, connection_timeout, response_wait_time);
+    return Produce(url, nullptr, curl_timeout, response_wait_time);
 }
 
 
 auto RequestPool::Produce(
     const std::string& url,
     std::function<void(RequestHandle)> on_complete_handler,
-    std::chrono::milliseconds connection_timeout,
+    std::chrono::milliseconds curl_timeout,
     std::optional<std::chrono::milliseconds> response_wait_time) -> RequestHandle
 {
     std::unique_lock lock{m_mutex};
@@ -66,7 +66,7 @@ auto RequestPool::Produce(
             new Request {
                 *this,
                 url,
-                connection_timeout,
+                curl_timeout,
                 response_wait_time,
                 std::move(on_complete_handler) }
         };
@@ -79,7 +79,7 @@ auto RequestPool::Produce(
         
         request_handle_ptr->SetOnCompleteHandler(std::move(on_complete_handler));
         request_handle_ptr->SetUrl(url);
-        request_handle_ptr->SetCurlTimeout(connection_timeout);
+        request_handle_ptr->SetCurlTimeout(curl_timeout);
         
         return RequestHandle { *this, std::move(request_handle_ptr) };
     }

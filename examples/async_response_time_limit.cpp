@@ -61,7 +61,11 @@ int main(int argc, char* argv[])
             lift::RequestHandle request = request_pool.Produce(url, on_complete, curl_timeout_time, timeout_time);
             event_loop.StartRequest(std::move(request));
         }
-    } // So we wait until the event loop destructs automatically
+        while (event_loop.HasUnfinishedRequests())
+        {
+            std::this_thread::sleep_for(1ms);
+        }
+    } // EventLoop destructor blocks and handles events until requests are finished
     
     std::cout << "Timeout count " << timeout_count << std::endl;
     std::cout << "Response count " << response_count << std::endl;

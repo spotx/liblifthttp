@@ -24,7 +24,7 @@ static constexpr uint64_t HEADER_DEFAULT_COUNT = 16;
 Request::Request(
     RequestPool& request_pool,
     const std::string& url,
-    std::chrono::milliseconds connection_time,
+    std::chrono::milliseconds curl_timeout,
     std::optional<std::chrono::milliseconds> response_wait_time,
     std::function<void(RequestHandle)> on_complete_handler,
     ssize_t max_download_bytes)
@@ -34,7 +34,7 @@ Request::Request(
 {
     init();
     SetUrl(url);
-    SetCurlTimeout(connection_time);
+    SetCurlTimeout(curl_timeout);
     if (response_wait_time.has_value())
     {
         SetResponseWaitTime(response_wait_time.value());

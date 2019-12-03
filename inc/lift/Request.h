@@ -76,7 +76,7 @@ public:
     /**
      * Sets the full timeout for this HTTP request.  This should be set before Perform() is called
      * or if this is an AsyncRequest before adding to an EventLoop.
-     * NOTE: If you have also set the response wait time, this is the should be longer than than the
+     * NOTE: If you have also set the response wait time, this is should be longer than than the
      * response wait time and should be used to keep connections alive. Otherwise, this is the only
      * timeout that will be used
      * @param timeout The timeout for the request.
@@ -286,12 +286,12 @@ private:
      * Private constructor -- only the RequestPool can create new Requests.
      * @param request_pool The request pool that generated this handle.
      * @param url          The url for the request.
-     * @param connection_timeout The maximum time to wait before quitting, calling the on_complete_handler
+     * @param curl_timeout The maximum time to wait before quitting, calling the on_complete_handler
      *                           and closing the connection.
      * @param response_wait_time Optional chrono milliseconds that indicate the maximum time to wait before
      *          calling the on complete callback -- the request will still wait for the connection to
-     *          return until the connection_timeout, but the Request will no longer be accessible.
-     *          If response_wait_time does not have a value, only connection_timeout is used and the functionality
+     *          return until the curl_timeout, but the Request will no longer be accessible.
+     *          If response_wait_time does not have a value, only curl_timeout is used and the functionality
      *          around response_wait_time will not be used.
      * @param on_complete_handler   Function to be called when the CURL request finishes.
      * @param max_download_bytes    The maximum number of bytes to download, if -1, will download entire file.
@@ -299,7 +299,7 @@ private:
     explicit Request(
         RequestPool& request_pool,
         const std::string& url,
-        std::chrono::milliseconds connection_timeout,
+        std::chrono::milliseconds curl_timeout,
         std::optional<std::chrono::milliseconds> response_wait_time,
         std::function<void(RequestHandle)> on_complete_handler = nullptr,
         ssize_t max_download_bytes = -1);
