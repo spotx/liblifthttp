@@ -12,7 +12,7 @@ auto EventLoop::StartRequests(
 
     // Lock scope
     {
-        std::lock_guard<std::mutex> guard(m_pending_requests_lock);
+        std::lock_guard<std::mutex> guard(m_pending_requests_mutex);
         for (auto& request : requests) {
             m_pending_requests.emplace_back(std::move(request));
         }

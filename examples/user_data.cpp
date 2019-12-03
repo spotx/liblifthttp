@@ -7,9 +7,10 @@
 #include <thread>
 #include <vector>
 
-static auto on_complete(lift::RequestHandle request, uint64_t user_data_value1, double user_data_value2) -> void
+static auto on_complete(lift::RequestHandle request_ptr, uint64_t user_data_value1, double user_data_value2) -> void
 {
-    std::cout << "RequestHandle id " << user_data_value1 << " with double " << user_data_value2 << " has completed: " << request->GetUrl() << std::endl;
+    const auto& request = *request_ptr;
+    std::cout << "RequestHandle id " << user_data_value1 << " with double " << user_data_value2 << " has completed: " << request.GetUrl() << std::endl;
 }
 
 int main(int argc, char* argv[])
@@ -33,7 +34,7 @@ int main(int argc, char* argv[])
     // sleep for a bit so this thread doesn't grab the active request count too fast and just shutdown
     std::this_thread::sleep_for(500ms);
 
-    while (event_loop.GetActiveRequestCount() > 0) {
+    while (event_loop.HasUnfinishedRequests()) {
         std::this_thread::sleep_for(10ms);
     }
 

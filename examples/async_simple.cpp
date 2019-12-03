@@ -6,16 +6,17 @@
 #include <string>
 #include <thread>
 
-static auto on_complete(lift::RequestHandle request) -> void
+static auto on_complete(lift::RequestHandle request_handle) -> void
 {
-    if (request->GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
+    auto& request = *request_handle;
+    if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         std::cout
-            << "Completed " << request->GetUrl()
-            << " ms:" << request->GetTotalTime().count() << std::endl;
+            << "Completed " << request.GetUrl()
+            << " ms:" << request.GetTotalTime().count() << std::endl;
     } else {
         std::cout
-            << "Error: " << request->GetUrl() << " : "
-            << lift::to_string(request->GetCompletionStatus()) << std::endl;
+            << "Error: " << request.GetUrl() << " : "
+            << lift::to_string(request.GetCompletionStatus()) << std::endl;
     }
 
     /**
@@ -50,7 +51,7 @@ int main(int argc, char* argv[])
      * and an additional 250ms timeout per each request.
      */
     std::chrono::milliseconds timeout = 250ms;
-    for (auto& url : urls) {
+    for (const auto& url : urls) {
         std::cout << "Requesting " << url << std::endl;
         lift::RequestHandle request = request_pool.Produce(url, on_complete, timeout);
         event_loop.StartRequest(std::move(request));
@@ -59,7 +60,7 @@ int main(int argc, char* argv[])
     }
 
     // Now wait for all the requests to finish before cleaning up.
-    while (event_loop.GetActiveRequestCount() > 0) {
+    while (event_loop.HasUnfinishedRequests()) {
         std::this_thread::sleep_for(100ms);
     }
 

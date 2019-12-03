@@ -7,9 +7,12 @@
 #include <curl/curl.h>
 #include <uv.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <iostream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,6 +20,10 @@
 namespace lift {
 class RequestHandle;
 class RequestPool;
+class EventLoop;
+class SharedRequest;
+
+class ResponseWaitTimeWrapper;
 
 class Request {
     friend class EventLoop;
@@ -40,15 +47,13 @@ public:
     /**
      * @param on_complete_handler When this request completes this handle is called.
      */
-    auto SetOnCompleteHandler(
-        std::function<void(RequestHandle)> on_complete_handler) -> void;
+    auto SetOnCompleteHandler(std::function<void(RequestHandle)> on_complete_handler) -> void;
 
     /**
      * @param url The URL of the HTTP request.
      * @return True if the url was set.
      */
-    auto SetUrl(
-        const std::string& url) -> bool;
+    auto SetUrl(const std::string& url) -> bool;
 
     /**
      * @return The currently set URL for this HTTP request.
@@ -69,13 +74,35 @@ public:
         http::Version http_version) -> void;
 
     /**
-     * Sets the timeout for this HTTP request.  This should be set before Perform() is called
+     * Sets the full timeout for this HTTP request.  This should be set before Perform() is called
      * or if this is an AsyncRequest before adding to an EventLoop.
+     * NOTE: If you have also set the response wait time, this is should be longer than than the
+     * response wait time and should be used to keep connections alive. Otherwise, this is the only
+     * timeout that will be used
      * @param timeout The timeout for the request.
      * @return True if the timeout was set.
      */
-    auto SetTimeout(
-        std::chrono::milliseconds timeout) -> bool;
+    auto SetCurlTimeout(std::chrono::milliseconds timeout) -> bool;
+    
+    /**
+     * Get/set optional chrono milliseconds indicating how long the request has
+     * before it times out. This should only be set when you want to give the request
+     * a longer timeout to accommodate keep-alive connections that may have a slow
+     * response.
+     * @{
+     */
+    [[nodiscard]]
+    auto GetResponseWaitTime() const -> const std::optional<std::chrono::milliseconds>&
+    {
+        return m_response_wait_time;
+    }
+    
+    auto SetResponseWaitTime(std::chrono::milliseconds timeout) -> void
+    {
+        m_response_wait_time.emplace(timeout);
+    }
+    
+    /** @} */
 
     /**
      * Sets the maximum number of bytes of data to write.
@@ -228,38 +255,52 @@ public:
     /**
      * @return  the number of connections made to make this request
      */
+     [[nodiscard]]
     auto GetNumConnects() const -> uint64_t;
     
     /**
      * Set the verify behavior of the CURLOPT_SSL_VERIFYPEER on the curl_handle
-     * @param verify the verify value to set the CURLOPT_SSL_VERIFYPEER option to
+     * @param verify Bool indicating whether we should require cURL to verify the SSL peer (true) or not (false)
      */
-    auto SetVerifySSLPeer(int64_t verify) -> void;
+    auto SetVerifySSLPeer(bool verify) -> void;
 
     /**
      * Set the verify behavior of the CURLOPT_SSL_VERIFYHOST on the curl_handle
-     * @param verify the verify value to set the CURLOPT_SSL_VERIFYHOST option to
+     * @param verify Bool indicating whether we should require cURL to verify the SSL host (true) or not (false)
      */
-    auto SetVerifySSLHost(int64_t verify) -> void;
+    auto SetVerifySSLHost(bool verify) -> void;
+    
+    /**
+     * Tells cURL to use an Accept-Encoding header that includes all built-in
+     * supported encodings in a comma-separated list.
+     * IMPORTANT: Using this is mutually exclusive with adding your own Accept-Encoding header.
+     */
+    auto SetAcceptAllEncoding() -> void;
 
     /**
      * Resets the request to be re-used.  This will clear everything on the request.
      */
     auto Reset() -> void;
-
 private:
     /**
      * Private constructor -- only the RequestPool can create new Requests.
      * @param request_pool The request pool that generated this handle.
      * @param url          The url for the request.
-     * @param timeout      The timeout for the request in milliseconds.
+     * @param curl_timeout The maximum time to wait before quitting, calling the on_complete_handler
+     *                           and closing the connection.
+     * @param response_wait_time Optional chrono milliseconds that indicate the maximum time to wait before
+     *          calling the on complete callback -- the request will still wait for the connection to
+     *          return until the curl_timeout, but the Request will no longer be accessible.
+     *          If response_wait_time does not have a value, only curl_timeout is used and the functionality
+     *          around response_wait_time will not be used.
      * @param on_complete_handler   Function to be called when the CURL request finishes.
      * @param max_download_bytes    The maximum number of bytes to download, if -1, will download entire file.
      */
     explicit Request(
         RequestPool& request_pool,
         const std::string& url,
-        std::chrono::milliseconds timeout,
+        std::chrono::milliseconds curl_timeout,
+        std::optional<std::chrono::milliseconds> response_wait_time,
         std::function<void(RequestHandle)> on_complete_handler = nullptr,
         ssize_t max_download_bytes = -1);
 
@@ -275,7 +316,7 @@ private:
     CURL* m_curl_handle { curl_easy_init() };
 
     /// A view into the curl url.
-    std::string_view m_url {};
+    std::string_view m_url;
     /// The request headers.
     std::string m_request_headers {};
     /// The request headers index.  Used to generate the curl slist.
@@ -302,6 +343,25 @@ private:
     ssize_t m_max_download_bytes { 0 };
     /// Number of bytes that have been written so far.
     ssize_t m_bytes_written { 0 };
+    
+    /**
+     * Bool indicating whether or not onComplete has been called (true) or not (false) so if a request exceeds
+     * its response wait time, its on complete handler can be called only once.
+     */
+    std::atomic_bool m_on_complete_has_been_called{false};
+    
+    /**
+     * Optional milliseconds indicating the response wait time for the request. If it is set, the request's
+     * on complete handler will be called even if we have not received a response and the status code will be
+     * set to indicate a response wait time timeout.
+     */
+    std::optional<std::chrono::milliseconds> m_response_wait_time;
+    
+    /**
+     * Optional iterator to the location in the EventLoop's multiset where the corresponding ResponseWaitTimeWrapper.
+     * This will only be set if the response wait time is used.
+     */
+    std::optional<std::multiset<ResponseWaitTimeWrapper>::iterator> m_response_wait_time_set_iterator;
 
     /**
      * Prepares the request to be performed.  This is called on a request
@@ -323,14 +383,42 @@ private:
      */
     auto setCompletionStatus(
         CURLcode curl_code) -> void;
-
-    auto onComplete() -> void;
+    
+    /**
+     * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
+     *          response wait times can be removed from the multiset of ResponseWaitTimeWrapper)
+     * @param shared_request Shared pointer to the SharedRequest that owns this Request, so it can be used to create
+     *          a RequestHandle and return the Request to the RequestPool if necessary.
+     * @param response_wait_time_timeout Bool indicating whether or not onComplete was called because
+     *          a response wait time was exceeded (true) or not (false)
+     */
+    auto onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout = false) -> void;
 
     /**
      * Helper function to find how many bytes are left to be downloaded for a request
      * @return ssize_t found by subtracting total number of downloaded bytes from max_download_bytes
      */
     auto getRemainingDownloadBytes() -> ssize_t;
+    
+    /**
+     * @param set_location The iterator from the set of ResponseWaitTimeWrapper used to "time out"
+     * requests who have not received their responses within the response wait time.
+     */
+    auto setTimeoutIterator(std::multiset<ResponseWaitTimeWrapper>::iterator set_location) -> void
+    {
+        m_response_wait_time_set_iterator.emplace(set_location);
+    }
+    
+    /**
+     * Updates the curl handle (m_curl_handle) so that its private data points to the shared_ptr<SharedRequest>
+     * on the heap in order to maintain the lifetime of SharedRequest.
+     * @param shared_request Pointer to the shared pointer to the SharedRequest that this curl handle should
+     *          use in callbacks.
+     */
+    auto setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void
+    {
+        curl_easy_setopt(m_curl_handle, CURLOPT_PRIVATE, shared_request);
+    }
 
     /// libcurl will call this function when a header is received for the HTTP request.
     friend auto curl_write_header(
@@ -349,6 +437,48 @@ private:
     /// libuv will call this function when the AddRequest() function is called.
     friend auto requests_accept_async(
         uv_async_t* handle) -> void;
+    
+    friend auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void;
+};
+
+/**
+ * Class wrapping information used by EventLoop to "time out" requests that have not
+ * received a response within the expected wait time.
+ */
+class ResponseWaitTimeWrapper
+{
+public:
+    ResponseWaitTimeWrapper(uint64_t timeout_time, std::shared_ptr<SharedRequest> request) : m_data{timeout_time, std::move(request)} {}
+    
+    struct Data
+    {
+        /**
+         * Represents the time point when the corresponding request should be timed out.
+         * Using uint64_t for consistency since uv_now returns time points as uint64_t.
+         */
+        uint64_t m_timeout_time;
+        /// Reference to the Request associated with this wrapper.
+        std::shared_ptr<SharedRequest> m_shared_request_ptr_pointer;
+    };
+    
+    /**
+     * @return Reference to the const Data struct associated with this wrapper.
+     */
+    [[nodiscard]]
+    auto GetData() const -> const Data& { return m_data; }
+    
+    /**
+     * Less than operator used by the multiset of ResponseWaitTimeWrapper to find the correct slot to insert this into.
+     * @param other Reference to const ResponseWaitTimeWrapper to use for comparison.
+     * @return Bool indicating if this wrapper is less than the other wrapper (true) or not (false)
+     */
+    inline auto operator<(const ResponseWaitTimeWrapper& other) const -> bool
+    {
+        return m_data.m_timeout_time < other.m_data.m_timeout_time;
+    }
+
+private:
+    const Data m_data;
 };
 
 } // namespace lift

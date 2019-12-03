@@ -9,6 +9,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -50,13 +51,12 @@ public:
      * @return Gets the number of active HTTP requests currently running.
      */
     [[nodiscard]]
-    auto GetActiveRequestCount() const -> uint64_t;
+    auto HasUnfinishedRequests() const -> bool;
 
     /**
      * @return The request pool for this EventLoop.
      */
     auto GetRequestPool() -> RequestPool&;
-
     /**
      * Adds a request to process.
      *
@@ -102,15 +102,16 @@ private:
     uv_async_t m_async {};
     /// libcurl requires a single timer to drive timeouts/wake-ups.
     uv_timer_t m_timeout_timer {};
+    uv_timer_t m_response_timer {};
     /// The libcurl multi handle for driving multiple easy handles at once.
     CURLM* m_cmh { curl_multi_init() };
 
     /// Pending requests are safely queued via this lock.
-    std::mutex m_pending_requests_lock {};
+    mutable std::mutex m_pending_requests_mutex{};
     /**
      * Pending requests are stored in this vector until they are picked up on the next
      * uv loop iteration.  Any memory accesses to this object should first acquire the
-     * m_pending_requests_lock to guarantee thread safety.
+     * m_pending_requests_mutex to guarantee thread safety.
      *
      * Before the EventLoop begins working on the pending requests, it swaps
      * the pending requests vector into the grabbed requests vector -- this is done
@@ -130,6 +131,16 @@ private:
     std::atomic<bool> m_async_closed { false };
     /// Flag to denote that the m_timeout_timer has been closed on shutdown.
     std::atomic<bool> m_timeout_timer_closed { false };
+    /// Flag to denote that the m_response_timer has been closed on shutdown.
+    std::atomic<bool> m_request_timer_closed { false };
+    
+    /**
+     * multiset containing ResponseWaitTimeWrapper, where each item holds a timepoint indicating when it should be
+     * timed out and a pointer to a shared pointer to a SharedRequest, so the shared pointer to the SharedRequest
+     * can live on the heap.
+     * A multiset is used so that multiple ResponseWaitTimeWrapper with the same timepoint can be stored.
+     */
+    std::multiset<ResponseWaitTimeWrapper> m_response_wait_time_wrappers;
 
     /// The background thread runs from this function.
     auto run() -> void;
@@ -147,7 +158,21 @@ private:
     auto checkActions(
         curl_socket_t socket,
         int event_bitmask) -> void;
-
+    
+    /**
+     * Called by on_response_wait_time_expired_callback, this method iterates through m_response_wait_time_wrappers
+     * and calls onComplete for the Requests which have not received responses within the expected wait time.
+     */
+    auto stopTimedOutRequests() -> void;
+    
+    /**
+     * Helper method to erase a ResponseWaitTimeWrapper object from the multiset using an iterator from the set.
+     * @param request_to_remove Iterator to erase from the multiset
+     * @return The next iterator in the multiset (this is returned from erase), so that we can loop through
+     *          the multiset and erase items as we go.
+     */
+    auto removeTimeoutByIterator(std::multiset<ResponseWaitTimeWrapper>::iterator request_to_remove) -> std::multiset<ResponseWaitTimeWrapper>::iterator;
+    
     /**
      * This function is called by libcurl to start a timeout with duration timeout_ms.
      *
@@ -233,6 +258,25 @@ private:
      */
     friend auto requests_accept_async(
         uv_async_t* handle) -> void;
+    
+    /**
+     * This function is called by libuv when the uv_timer_t handle for request times is triggered.
+     *
+     * This function is a friend so it can call stopTimedOutRequests.
+     *
+     * @param handle The uv_timer_t handle, which will hold a pointer to the corresponding EventLoop in data
+     */
+    friend auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void;
+    
+    /**
+     * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
+     *          response wait times can be removed from the multiset of ResponseWaitTimeWrapper)
+     * @param shared_request Shared pointer to the SharedRequest that owns this Request, so it can be used to create
+     *          a RequestHandle and return the Request to the RequestPool if necessary.
+     * @param response_wait_time_timeout Bool indicating whether or not onComplete was called because
+     *          a response wait time was exceeded (true) or not (false)
+     */
+    friend auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout) -> void;
 };
 
 } // lift

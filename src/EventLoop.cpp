@@ -3,6 +3,7 @@
 #include <curl/multi.h>
 
 #include <chrono>
+#include <iostream>
 #include <thread>
 
 using namespace std::chrono_literals;
@@ -93,8 +94,10 @@ auto on_uv_curl_perform_callback(
     int status,
     int events) -> void;
 
-auto requests_accept_async(
-    uv_async_t* handle) -> void;
+auto requests_accept_async(uv_async_t* handle) -> void;
+
+auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void;
+
 
 EventLoop::EventLoop()
 {
@@ -103,6 +106,11 @@ EventLoop::EventLoop()
 
     uv_timer_init(m_loop, &m_timeout_timer);
     m_timeout_timer.data = this;
+
+    // Initialize the request timer, which will be used to "stop" requests that have not received
+    // a response with in the requested time.
+    uv_timer_init(m_loop, &m_response_timer);
+    m_response_timer.data = this;
 
     curl_multi_setopt(m_cmh, CURLMOPT_SOCKETFUNCTION, curl_handle_socket_actions);
     curl_multi_setopt(m_cmh, CURLMOPT_SOCKETDATA, this);
@@ -125,17 +133,19 @@ EventLoop::~EventLoop()
 {
     m_is_stopping = true;
 
-    while (GetActiveRequestCount() > 0) {
+    while (HasUnfinishedRequests()) {
         std::this_thread::sleep_for(1ms);
     }
 
     uv_timer_stop(&m_timeout_timer);
     uv_close(uv_type_cast<uv_handle_t>(&m_timeout_timer), uv_close_callback);
+    uv_timer_stop(&m_response_timer);
+    uv_close(uv_type_cast<uv_handle_t>(&m_response_timer), uv_close_callback);
     uv_close(uv_type_cast<uv_handle_t>(&m_async), uv_close_callback);
     uv_async_send(&m_async); // fake a request to make sure the loop wakes up
     uv_stop(m_loop);
 
-    while (!m_timeout_timer_closed && !m_async_closed) {
+    while (!m_timeout_timer_closed && !m_request_timer_closed && !m_async_closed) {
         std::this_thread::sleep_for(1ms);
     }
 
@@ -155,9 +165,10 @@ auto EventLoop::Stop() -> void
     m_is_stopping = true;
 }
 
-auto EventLoop::GetActiveRequestCount() const -> uint64_t
+auto EventLoop::HasUnfinishedRequests() const -> bool
 {
-    return m_active_request_count;
+    std::unique_lock lock{m_pending_requests_mutex};
+    return ((m_active_request_count.load() > 0) || !m_pending_requests.empty());
 }
 
 auto EventLoop::GetRequestPool() -> RequestPool&
@@ -171,16 +182,70 @@ auto EventLoop::StartRequest(
     if (m_is_stopping) {
         return false;
     }
-
     // We'll prepare now since it won't block the event loop thread.
     request->prepareForPerform();
     {
-        std::lock_guard<std::mutex> guard { m_pending_requests_lock };
+        std::lock_guard<std::mutex> guard {m_pending_requests_mutex };
         m_pending_requests.emplace_back(std::move(request));
     }
     uv_async_send(&m_async);
-
     return true;
+}
+
+auto EventLoop::stopTimedOutRequests() -> void
+{
+    // If the wrappers multiset is empty, then we don't have anything to stop
+    if (m_response_wait_time_wrappers.empty())
+    {
+        return;
+    }
+
+    // Get the current timepoint from libuv (it caches the current timepoint at the beginning
+    // of every cycle through the event loop, so this should not be expensive).
+    auto now = uv_now(m_loop);
+
+    for (
+        auto current_wrapper = m_response_wait_time_wrappers.begin();
+        current_wrapper != m_response_wait_time_wrappers.end() && current_wrapper->GetData().m_timeout_time <= now;
+        // We increment current_wrapper by setting it to the iterator returned from erasing the current one
+    )
+    {
+        // Get the shared pointer out of the ResponseWaitTimeWrapper and into a unique pointer so it cleans
+        // itself up at the end of this method.
+        auto& data = current_wrapper->GetData();
+        auto shared_request = data.m_shared_request_ptr_pointer;
+    
+        // Update current_wrapper with the result of removing the wrapper from the multiset
+        current_wrapper = removeTimeoutByIterator(current_wrapper);
+    
+        // Call onComplete on the underlying Request object, copying in the shared_pointer
+        // so we get a correct reference count.
+        shared_request->GetAsReference().onComplete(*this, shared_request, true);
+    }
+    
+    // If there are still items in the multiset, get the first item and use its time to reset the request timer.
+    if (!m_response_wait_time_wrappers.empty())
+    {
+        auto& request_time = m_response_wait_time_wrappers.begin()->GetData().m_timeout_time;
+        uv_timer_stop(&m_response_timer);
+    
+        uv_timer_start(
+            &m_response_timer,
+            on_response_wait_time_expired_callback,
+            request_time - now,
+            0);
+    }
+}
+
+auto EventLoop::removeTimeoutByIterator(std::multiset<ResponseWaitTimeWrapper>::iterator request_to_remove) -> std::multiset<ResponseWaitTimeWrapper>::iterator
+{
+    // Get a reference to the SharedRequest pointed to by the shared pointer.
+    auto& shared_request = *request_to_remove->GetData().m_shared_request_ptr_pointer;
+    
+    // Reset the iterator stored on the Request so it can't be reused.
+    shared_request.GetAsReference().m_response_wait_time_set_iterator.reset();
+    
+    return m_response_wait_time_wrappers.erase(request_to_remove);
 }
 
 auto EventLoop::run() -> void
@@ -216,12 +281,15 @@ auto EventLoop::checkActions(
             CURL* easy_handle = message->easy_handle;
             CURLcode easy_result = message->data.result;
 
-            Request* raw_request_handle_ptr = nullptr;
-            curl_easy_getinfo(easy_handle, CURLINFO_PRIVATE, &raw_request_handle_ptr);
+            // So the reacquired shared_ptr destructs itself correctly, let's get it into a unique pointer
+            std::unique_ptr<std::shared_ptr<SharedRequest>> shared_request_ptr_pointer;
+            curl_easy_getinfo(easy_handle, CURLINFO_PRIVATE, &shared_request_ptr_pointer);
             curl_multi_remove_handle(m_cmh, easy_handle);
 
-            raw_request_handle_ptr->setCompletionStatus(easy_result);
-            raw_request_handle_ptr->onComplete();
+            auto shared_request_ptr = *shared_request_ptr_pointer;
+            
+            shared_request_ptr->GetAsReference().setCompletionStatus(easy_result);
+            shared_request_ptr->GetAsReference().onComplete(*this, shared_request_ptr);
 
             --m_active_request_count;
         }
@@ -305,10 +373,17 @@ auto curl_handle_socket_actions(
 auto uv_close_callback(uv_handle_t* handle) -> void
 {
     auto* event_loop = static_cast<EventLoop*>(handle->data);
-    if (handle == uv_type_cast<uv_handle_t>(&event_loop->m_async)) {
+    if (handle == uv_type_cast<uv_handle_t>(&event_loop->m_async))
+    {
         event_loop->m_async_closed = true;
-    } else if (handle == uv_type_cast<uv_handle_t>(&event_loop->m_timeout_timer)) {
+    }
+    else if (handle == uv_type_cast<uv_handle_t>(&event_loop->m_timeout_timer))
+    {
         event_loop->m_timeout_timer_closed = true;
+    }
+    else if (handle == uv_type_cast<uv_handle_t>(&event_loop->m_response_timer))
+    {
+        event_loop->m_request_timer_closed = true;
     }
 }
 
@@ -343,11 +418,10 @@ auto on_uv_curl_perform_callback(
     event_loop.checkActions(curl_context->GetCurlSockFd(), action);
 }
 
-auto requests_accept_async(
-    uv_async_t* handle) -> void
+auto requests_accept_async(uv_async_t* handle) -> void
 {
     auto* event_loop = static_cast<EventLoop*>(handle->data);
-
+    
     /**
      * This lock must not have any "curl_*" functions called
      * while it is held, curl has its own internal locks and
@@ -356,46 +430,85 @@ auto requests_accept_async(
      * to the Request objects on the EventLoop thread.
      */
     {
-        std::lock_guard<std::mutex> guard { event_loop->m_pending_requests_lock };
+        std::lock_guard<std::mutex> guard { event_loop->m_pending_requests_mutex };
         // swap so we can release the lock as quickly as possible
-        event_loop->m_grabbed_requests.swap(
-            event_loop->m_pending_requests);
+        event_loop->m_grabbed_requests.swap(event_loop->m_pending_requests);
+        // Add size of grabbed requests to active request count now HasUnfinishedRequests can return accurately.
+        event_loop->m_active_request_count += event_loop->m_grabbed_requests.size();
     }
 
-    for (auto& request : event_loop->m_grabbed_requests) {
-        auto& raw_request_handle = request.m_request_handle;
-
-        auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request_handle->m_curl_handle);
-
+    for (auto& request_handle : event_loop->m_grabbed_requests)
+    {
+        auto& raw_request = *request_handle;
+        
+        // If there's a response wait time, we'll need to create a ResponseWaitTimeWrapper and add
+        // it to the wrapper multiset so it can be handled in the event it takes too long to respond.
+        if (const auto& response_wait_time_opt = raw_request.GetResponseWaitTime(); response_wait_time_opt.has_value())
+        {
+            // Get the current timepoint from libuv (it caches the current timepoint at the beginning
+            // of every cycle through the event loop, so this should not be expensive).
+            auto time = uv_now(event_loop->m_loop);
+            
+            const auto request_timeout = response_wait_time_opt.value();
+            auto next_timepoint = time + static_cast<uint64_t>(request_timeout.count());
+        
+            auto& wrappers = event_loop->m_response_wait_time_wrappers;
+            
+            if (wrappers.empty() || next_timepoint < wrappers.begin()->GetData().m_timeout_time)
+            {
+                uv_timer_stop(&event_loop->m_response_timer);
+    
+                uv_timer_start(
+                    &event_loop->m_response_timer,
+                    on_response_wait_time_expired_callback,
+                    static_cast<uint64_t>(request_timeout.count()),
+                    0);
+            }
+        
+            auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint,
+                                                                              request_handle.m_shared_request);
+            request_handle->setTimeoutIterator(iterator);
+        }
+    
+        // Create a shared_ptr to the SharedRequest on the heap so its lifetime is maintained after exiting this function.
+        auto shared_request_on_heap = request_handle.createSharedRequestOnHeap();
+        
+        auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request.m_curl_handle);
+    
         if(curl_code != CURLM_OK && curl_code != CURLM_CALL_MULTI_PERFORM)
         {
             /**
              * If curl_multi_add_handle fails then notify the user that the request failed to start
              * immediately.
              */
-            request->setCompletionStatus(CURLcode::CURLE_SEND_ERROR);
-            request->onComplete();
+            request_handle->setCompletionStatus(CURLcode::CURLE_SEND_ERROR);
+
+            // If we are calling onComplete now, move the shared_ptr into the method so it cleans itself up correctly.
+            request_handle->onComplete(*event_loop, std::move(*shared_request_on_heap));
         }
         else
         {
+            // We are going to wait for a response, so we need to set pointer to the shared pointer on the request
+            // so we can get it back later in checkActions.
+            raw_request.setSharedPointerOnCurlHandle(shared_request_on_heap.release());
+            
             /**
              * Immediately call curl's check action to get the current request moving.
              * Curl appears to have an internal queue and if it gets too long it might
              * drop requests.
              */
             event_loop->checkActions();
-
-            /**
-             * Drop the unique_ptr safety around the RequestHandle while it is being
-             * processed by curl.  When curl is finished completing the request
-             * it will be put back into a Request object for the client to use.
-             */
-            (void)raw_request_handle.release();
         }
     }
-
-    event_loop->m_active_request_count += event_loop->m_grabbed_requests.size();
+    
     event_loop->m_grabbed_requests.clear();
 }
+
+auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void
+{
+    auto* event_loop = static_cast<EventLoop*>(handle->data);
+    event_loop->stopTimedOutRequests();
+}
+
 
 } // lift

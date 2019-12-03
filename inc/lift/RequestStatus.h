@@ -15,6 +15,7 @@ enum class RequestStatus {
     CONNECT_SSL_ERROR, ///< The request has an SSL connection error.
 
     TIMEOUT, ///< The request timed out.
+    RESPONSE_WAIT_TIME_TIMEOUT, ///< Did not receive a response within the specified wait time
     RESPONSE_EMPTY, ///< The request has an empty response (socket severed).
 
     ERROR, ///< The request had an error and failed.

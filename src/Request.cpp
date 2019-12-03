@@ -1,7 +1,9 @@
 #include "lift/Request.h"
+#include "lift/EventLoop.h"
 #include "lift/RequestHandle.h"
 
 #include <cstring>
+#include <iostream>
 
 namespace lift {
 auto curl_write_header(
@@ -22,7 +24,8 @@ static constexpr uint64_t HEADER_DEFAULT_COUNT = 16;
 Request::Request(
     RequestPool& request_pool,
     const std::string& url,
-    std::chrono::milliseconds timeout_ms,
+    std::chrono::milliseconds curl_timeout,
+    std::optional<std::chrono::milliseconds> response_wait_time,
     std::function<void(RequestHandle)> on_complete_handler,
     ssize_t max_download_bytes)
     : m_on_complete_handler(std::move(on_complete_handler))
@@ -31,7 +34,11 @@ Request::Request(
 {
     init();
     SetUrl(url);
-    SetTimeout(timeout_ms);
+    SetCurlTimeout(curl_timeout);
+    if (response_wait_time.has_value())
+    {
+        SetResponseWaitTime(response_wait_time.value());
+    }
 }
 
 Request::~Request()
@@ -48,7 +55,6 @@ Request::~Request()
 
 auto Request::init() -> void
 {
-    curl_easy_setopt(m_curl_handle, CURLOPT_PRIVATE, this);
     curl_easy_setopt(m_curl_handle, CURLOPT_HEADERFUNCTION, curl_write_header);
     curl_easy_setopt(m_curl_handle, CURLOPT_HEADERDATA, this);
     curl_easy_setopt(m_curl_handle, CURLOPT_WRITEFUNCTION, curl_write_data);
@@ -79,7 +85,7 @@ auto Request::SetUrl(const std::string& url) -> bool
         return false;
     }
 
-    auto error_code = curl_easy_setopt(m_curl_handle, CURLOPT_URL, url.c_str());
+    auto error_code = curl_easy_setopt(m_curl_handle, CURLOPT_URL, url.data());
     if (error_code == CURLE_OK) {
         char* curl_url = nullptr;
         curl_easy_getinfo(m_curl_handle, CURLINFO_EFFECTIVE_URL, &curl_url);
@@ -167,7 +173,7 @@ auto Request::SetMaxDownloadBytes(ssize_t max_download_bytes) -> void
     m_bytes_written = 0;
 }
 
-auto Request::SetTimeout(
+auto Request::SetCurlTimeout(
     std::chrono::milliseconds timeout) -> bool
 {
     int64_t timeout_ms = timeout.count();
@@ -332,14 +338,40 @@ auto Request::GetCompletionStatus() const -> RequestStatus
     return m_status_code;
 }
 
-auto Request::SetVerifySSLPeer(int64_t verify) -> void
+auto Request::SetVerifySSLPeer(bool verify) -> void
 {
-    curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYPEER, verify);
+    if (verify)
+    {
+        curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYPEER, 1L);
+    }
+    else
+    {
+        curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
+    }
 }
 
-auto Request::SetVerifySSLHost(int64_t verify) -> void
+auto Request::SetVerifySSLHost(bool verify) -> void
 {
-    curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYHOST, verify);
+    if (verify)
+    {
+        // Re CURL docs (https://curl.haxx.se/libcurl/c/CURLOPT_SSL_VERIFYHOST.html),
+        // depending on the version of curl used, setting CURLOPT_SSL_VERIFYHOST to 1L vs 2L will
+        // have different results. To maintain forwards and backwards compatibility, using 2L
+        curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYHOST, 2L);
+    }
+    else
+    {
+        curl_easy_setopt(m_curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+}
+
+auto Request::SetAcceptAllEncoding() -> void
+{
+    // From the CURL docs (https://curl.haxx.se/libcurl/c/CURLOPT_ACCEPT_ENCODING.html):
+    // 'To aid applications not having to bother about what specific algorithms this particular
+    // libcurl build supports, libcurl allows a zero-length string to be set ("") to ask for an
+    // Accept-Encoding: header to be used that contains all built-in supported encodings.'
+    curl_easy_setopt(m_curl_handle, CURLOPT_ACCEPT_ENCODING, "");
 }
 
 auto Request::Reset() -> void
@@ -367,6 +399,10 @@ auto Request::Reset() -> void
 
     m_max_download_bytes = -1; // Set max download bytes to default to download entire file
     m_bytes_written = 0;
+    
+    m_on_complete_has_been_called.store(false);
+    m_response_wait_time.reset();
+    m_response_wait_time_set_iterator.reset();
 }
 
 auto Request::prepareForPerform() -> void
@@ -449,10 +485,31 @@ auto Request::setCompletionStatus(
 #pragma GCC diagnostic pop
 }
 
-auto Request::onComplete() -> void
+auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout) -> void
 {
-    RequestHandle request(&m_request_pool, std::unique_ptr<Request>(this));
-    m_on_complete_handler(std::move(request));
+    auto request_handle_ptr = RequestHandle(std::move(shared_request));
+    
+    // We only call the stored on complete function once!
+    if (!m_on_complete_has_been_called.exchange(true, std::memory_order_acquire))
+    {
+        if (response_wait_time_timeout)
+        {
+            // But if the request did time out, set the on complete handler will know.
+            m_status_code = RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT;
+        }
+        
+        if (m_on_complete_handler != nullptr)
+        {
+            // Call the on complete handler with a reference to the request.
+            m_on_complete_handler(std::move(request_handle_ptr));
+        }
+    }
+    
+    // If we have an iterator, remove it from the set so we won't try to time it out and then call onComplete again.
+    if (m_response_wait_time_set_iterator.has_value())
+    {
+        event_loop.removeTimeoutByIterator(m_response_wait_time_set_iterator.value());
+    }
 }
 
 auto Request::getRemainingDownloadBytes() -> ssize_t
@@ -467,6 +524,14 @@ auto curl_write_header(
     void* user_ptr) -> size_t
 {
     auto* raw_request_ptr = static_cast<Request*>(user_ptr);
+    
+    // If we've already called the on complete handler, the request might still be in userland,
+    // so we don't want to modify it.
+    if (raw_request_ptr->m_on_complete_has_been_called.load())
+    {
+        return 0;
+    }
+
     size_t data_length = size * nitems;
 
     std::string_view data_view { buffer, data_length };
@@ -559,5 +624,4 @@ auto curl_write_data(
 
     return data_length;
 }
-
 } // lift

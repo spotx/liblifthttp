@@ -6,19 +6,20 @@
 #include <string>
 #include <thread>
 
-static auto on_complete(lift::RequestHandle request) -> void
+static auto on_complete(lift::RequestHandle request_handle) -> void
 {
-    if (request->GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
+    auto& request = *request_handle;
+    if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         std::cout
-            << "Completed " << request->GetUrl()
-            << " in " << request->GetTotalTime().count() << " ms with a "
-            << "result length of " << request->GetResponseData().length() << std::endl
+            << "Completed " << request.GetUrl()
+            << " in " << request.GetTotalTime().count() << " ms with a "
+            << "result length of " << request.GetResponseData().length() << std::endl
             << std::endl;
     } else {
         std::cout
-            << "Error: " << request->GetUrl() << " : "
-            << lift::to_string(request->GetCompletionStatus()) << std::endl
-            << "Result length: " << request->GetResponseData().length() << std::endl
+            << "Error: " << request.GetUrl() << " : "
+            << lift::to_string(request.GetCompletionStatus()) << std::endl
+            << "Result length: " << request.GetResponseData().length() << std::endl
             << std::endl;
     }
 
@@ -74,7 +75,7 @@ int main(int argc, char* argv[])
     std::cout << std::endl;
 
     // Now wait for all the requests to finish before cleaning up.
-    while (event_loop.GetActiveRequestCount() > 0) {
+    while (event_loop.HasUnfinishedRequests()) {
         std::this_thread::sleep_for(100ms);
     }
 
