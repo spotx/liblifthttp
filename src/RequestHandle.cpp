@@ -15,12 +15,6 @@ RequestHandle::RequestHandle(std::shared_ptr<SharedRequest> shared_request)
     : m_shared_request(std::move(shared_request))
 {}
 
-auto RequestHandle::createSharedRequestOnHeap() const -> std::unique_ptr<std::shared_ptr<SharedRequest>>
-{
-    // Static cast to actual pointer type to silence cppcoreguidelines-owning-memory warning.
-    return std::make_unique<std::shared_ptr<SharedRequest>>(m_shared_request);
-}
-
 auto RequestHandle::operator*() -> Request&
 {
     return m_shared_request->GetAsReference();

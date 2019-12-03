@@ -11,9 +11,10 @@ class RequestPool;
 class EventLoop;
 
 /**
- * This is a proxy object to automatically reclaim finished requests
- * into the RequestPool.  The user simply uses it like a std::unique_ptr
- * by accessing the underlying RequestHandle via the * or -> operators.
+ * This is a proxy object wrapping a shared pointer to a SharedRequest, so the SharedRequest
+ * can be automatically cleaned up when appropriate (by releasing it into the RequestPool).
+ * The user simply uses it like a std::unique_ptr, accessing the underlying Request held by
+ * the SharedRequest via the * or -> operators.
  */
 class RequestHandle {
     friend class RequestPool;
@@ -44,15 +45,22 @@ private:
     
     explicit RequestHandle(std::shared_ptr<SharedRequest> shared_request);
     
+    /**
+     * Create and return unique pointer to a shared pointer to a SharedRequest so caller
+     * can either release the pointer (and reacquire in libuv callback) or go out of scope
+     * and clean up the shared pointer.
+     * @return New unique pointer to a shared pointer to a SharedRequest
+     */
     [[nodiscard]]
-    auto createSharedRequestOnHeap() const -> std::unique_ptr<std::shared_ptr<SharedRequest>>;
-    
-    [[nodiscard]]
-    auto createCopyOfSharedRequest() const -> std::shared_ptr<SharedRequest>
+    auto createSharedRequestOnHeap() const -> std::unique_ptr<std::shared_ptr<SharedRequest>>
     {
-        return m_shared_request;
+        return std::make_unique<std::shared_ptr<SharedRequest>>(m_shared_request);
     }
     
+    /**
+     * Shared pointer to a SharedRequest, so when the handle goes out of the scope, the SharedRequest
+     * can be cleaned up if there are no other shared pointers pointing to the underlying object.
+     */
     std::shared_ptr<SharedRequest> m_shared_request;
 
     /// Friend so it can release the m_request_handle appropriately.

@@ -465,7 +465,8 @@ auto requests_accept_async(uv_async_t* handle) -> void
                     0);
             }
         
-            auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint, request_handle.createCopyOfSharedRequest());
+            auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint,
+                                                                              request_handle.m_shared_request);
             request_handle->setTimeoutIterator(iterator);
         }
     
