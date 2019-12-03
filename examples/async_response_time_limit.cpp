@@ -24,12 +24,13 @@ static auto on_complete(lift::RequestHandle request_handle) -> void
 
 int main(int argc, char* argv[])
 {
-    if (argc < 4)
+    if (argc < 5)
     {
         std::cout
             << "Please provide URL as the first argument, "
-            << "millisecond request timeout as the second argument, and"
-            << "the number of requests to send as the third argument."
+            << "millisecond request timeout as the second argument, "
+            << "millisecond request curl timeout time as the third argument, and "
+            << "the number of requests to send as the fourth argument."
             << std::endl;
         
         return 0;
@@ -42,7 +43,8 @@ int main(int argc, char* argv[])
     
     std::string url{argv[1]};
     std::chrono::milliseconds timeout_time{std::stoi(argv[2])};
-    std::size_t num_requests{static_cast<std::size_t>(std::stoi(argv[3]))};
+    std::chrono::milliseconds curl_timeout_time{std::stoi(argv[3])};
+    std::size_t num_requests{static_cast<std::size_t>(std::stoi(argv[4]))};
     
     {
         lift::EventLoop event_loop;
@@ -56,7 +58,7 @@ int main(int argc, char* argv[])
         
         for (std::size_t count = 0; count < num_requests; ++count)
         {
-            lift::RequestHandle request = request_pool.Produce(url, on_complete, 2'000ms, timeout_time);
+            lift::RequestHandle request = request_pool.Produce(url, on_complete, curl_timeout_time, timeout_time);
             event_loop.StartRequest(std::move(request));
         }
     } // So we wait until the event loop destructs automatically

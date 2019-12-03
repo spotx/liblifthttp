@@ -97,7 +97,11 @@ public:
         return m_response_wait_time;
     }
     
-    auto SetResponseWaitTime(std::chrono::milliseconds timeout) -> void;
+    auto SetResponseWaitTime(std::chrono::milliseconds timeout) -> void
+    {
+        m_response_wait_time.emplace(timeout);
+    }
+    
     /** @} */
 
     /**
@@ -339,9 +343,6 @@ private:
     ssize_t m_max_download_bytes { 0 };
     /// Number of bytes that have been written so far.
     ssize_t m_bytes_written { 0 };
-    
-    /// How long the curl request is given before timing out.
-    std::chrono::milliseconds m_curl_timeout;
     
     /**
      * Bool indicating whether or not onComplete has been called (true) or not (false) so if a request exceeds

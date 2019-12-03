@@ -176,13 +176,6 @@ auto Request::SetMaxDownloadBytes(ssize_t max_download_bytes) -> void
 auto Request::SetCurlTimeout(
     std::chrono::milliseconds timeout) -> bool
 {
-    if (m_response_wait_time.has_value() && timeout > m_response_wait_time)
-    {
-        timeout = m_response_wait_time.value();
-    }
-    
-    m_curl_timeout = timeout;
-    
     int64_t timeout_ms = timeout.count();
 
     if (timeout_ms > 0) {
@@ -190,16 +183,6 @@ auto Request::SetCurlTimeout(
         return (error_code == CURLE_OK);
     }
     return false;
-}
-
-auto Request::SetResponseWaitTime(std::chrono::milliseconds timeout) -> void
-{
-    if (timeout > m_curl_timeout)
-    {
-        timeout = m_curl_timeout;
-    }
-
-    m_response_wait_time.emplace(timeout);
 }
 
 auto Request::SetFollowRedirects(
