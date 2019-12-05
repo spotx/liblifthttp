@@ -3,7 +3,6 @@
 #include <curl/multi.h>
 
 #include <chrono>
-#include <iostream>
 #include <thread>
 
 using namespace std::chrono_literals;
@@ -214,21 +213,21 @@ auto EventLoop::stopTimedOutRequests() -> void
         // itself up at the end of this method.
         auto& data = current_wrapper->GetData();
         auto shared_request = data.m_shared_request_ptr_pointer;
-    
+
         // Update current_wrapper with the result of removing the wrapper from the multiset
         current_wrapper = removeTimeoutByIterator(current_wrapper);
-    
+
         // Call onComplete on the underlying Request object, copying in the shared_pointer
         // so we get a correct reference count.
         shared_request->GetAsReference().onComplete(*this, shared_request, true);
     }
-    
+
     // If there are still items in the multiset, get the first item and use its time to reset the request timer.
     if (!m_response_wait_time_wrappers.empty())
     {
         auto& request_time = m_response_wait_time_wrappers.begin()->GetData().m_timeout_time;
         uv_timer_stop(&m_response_timer);
-    
+
         uv_timer_start(
             &m_response_timer,
             on_response_wait_time_expired_callback,
@@ -241,10 +240,10 @@ auto EventLoop::removeTimeoutByIterator(std::multiset<ResponseWaitTimeWrapper>::
 {
     // Get a reference to the SharedRequest pointed to by the shared pointer.
     auto& shared_request = *request_to_remove->GetData().m_shared_request_ptr_pointer;
-    
+
     // Reset the iterator stored on the Request so it can't be reused.
     shared_request.GetAsReference().m_response_wait_time_set_iterator.reset();
-    
+
     return m_response_wait_time_wrappers.erase(request_to_remove);
 }
 
@@ -282,12 +281,14 @@ auto EventLoop::checkActions(
             CURLcode easy_result = message->data.result;
 
             // So the reacquired shared_ptr destructs itself correctly, let's get it into a unique pointer
-            std::unique_ptr<std::shared_ptr<SharedRequest>> shared_request_ptr_pointer;
-            curl_easy_getinfo(easy_handle, CURLINFO_PRIVATE, &shared_request_ptr_pointer);
+            std::shared_ptr<SharedRequest>* curl_info_private_pointer{nullptr};
+            curl_easy_getinfo(easy_handle, CURLINFO_PRIVATE, &curl_info_private_pointer);
             curl_multi_remove_handle(m_cmh, easy_handle);
 
+            std::unique_ptr<std::shared_ptr<SharedRequest>> shared_request_ptr_pointer{curl_info_private_pointer};
+
             auto shared_request_ptr = *shared_request_ptr_pointer;
-            
+
             shared_request_ptr->GetAsReference().setCompletionStatus(easy_result);
             shared_request_ptr->GetAsReference().onComplete(*this, shared_request_ptr);
 
@@ -421,7 +422,7 @@ auto on_uv_curl_perform_callback(
 auto requests_accept_async(uv_async_t* handle) -> void
 {
     auto* event_loop = static_cast<EventLoop*>(handle->data);
-    
+
     /**
      * This lock must not have any "curl_*" functions called
      * while it is held, curl has its own internal locks and
@@ -440,7 +441,7 @@ auto requests_accept_async(uv_async_t* handle) -> void
     for (auto& request_handle : event_loop->m_grabbed_requests)
     {
         auto& raw_request = *request_handle;
-        
+
         // If there's a response wait time, we'll need to create a ResponseWaitTimeWrapper and add
         // it to the wrapper multiset so it can be handled in the event it takes too long to respond.
         if (const auto& response_wait_time_opt = raw_request.GetResponseWaitTime(); response_wait_time_opt.has_value())
@@ -448,33 +449,38 @@ auto requests_accept_async(uv_async_t* handle) -> void
             // Get the current timepoint from libuv (it caches the current timepoint at the beginning
             // of every cycle through the event loop, so this should not be expensive).
             auto time = uv_now(event_loop->m_loop);
-            
+
             const auto request_timeout = response_wait_time_opt.value();
             auto next_timepoint = time + static_cast<uint64_t>(request_timeout.count());
-        
+
             auto& wrappers = event_loop->m_response_wait_time_wrappers;
-            
+
             if (wrappers.empty() || next_timepoint < wrappers.begin()->GetData().m_timeout_time)
             {
                 uv_timer_stop(&event_loop->m_response_timer);
-    
+
                 uv_timer_start(
                     &event_loop->m_response_timer,
                     on_response_wait_time_expired_callback,
                     static_cast<uint64_t>(request_timeout.count()),
                     0);
             }
-        
+
             auto iterator = event_loop->m_response_wait_time_wrappers.emplace(next_timepoint,
                                                                               request_handle.m_shared_request);
             request_handle->setTimeoutIterator(iterator);
         }
-    
+
         // Create a shared_ptr to the SharedRequest on the heap so its lifetime is maintained after exiting this function.
         auto shared_request_on_heap = request_handle.createSharedRequestOnHeap();
-        
+
+        // Set the pointer to the shared pointer to the SharedRequest on the curl handle so we can get it back
+        // when the callback is called. (We'll release it from the unique pointer later if the call
+        // curl_multi_add_handle does not return an error.)
+        request_handle->setSharedPointerOnCurlHandle(shared_request_on_heap.get());
+
         auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request.m_curl_handle);
-    
+
         if(curl_code != CURLM_OK && curl_code != CURLM_CALL_MULTI_PERFORM)
         {
             /**
@@ -484,23 +490,23 @@ auto requests_accept_async(uv_async_t* handle) -> void
             request_handle->setCompletionStatus(CURLcode::CURLE_SEND_ERROR);
 
             // If we are calling onComplete now, move the shared_ptr into the method so it cleans itself up correctly.
-            request_handle->onComplete(*event_loop, std::move(*shared_request_on_heap));
+            request_handle->onComplete(*event_loop, *shared_request_on_heap);
         }
         else
         {
-            // We are going to wait for a response, so we need to set pointer to the shared pointer on the request
-            // so we can get it back later in checkActions.
-            raw_request.setSharedPointerOnCurlHandle(shared_request_on_heap.release());
-            
             /**
              * Immediately call curl's check action to get the current request moving.
              * Curl appears to have an internal queue and if it gets too long it might
              * drop requests.
              */
             event_loop->checkActions();
+
+            // We are going to wait for a response, so we need to release the pointer to the shared pointer so we can
+            // get it back later in checkActions.
+            (void)shared_request_on_heap.release();
         }
     }
-    
+
     event_loop->m_grabbed_requests.clear();
 }
 

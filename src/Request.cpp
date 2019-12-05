@@ -3,7 +3,6 @@
 #include "lift/RequestHandle.h"
 
 #include <cstring>
-#include <iostream>
 
 namespace lift {
 auto curl_write_header(
@@ -392,7 +391,6 @@ auto Request::Reset() -> void
     }
 
     clearResponseBuffers();
-
     curl_easy_reset(m_curl_handle);
     init();
     m_status_code = RequestStatus::BUILDING;

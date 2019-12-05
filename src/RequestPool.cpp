@@ -80,6 +80,10 @@ auto RequestPool::Produce(
         request_handle_ptr->SetOnCompleteHandler(std::move(on_complete_handler));
         request_handle_ptr->SetUrl(url);
         request_handle_ptr->SetCurlTimeout(curl_timeout);
+        if (response_wait_time.has_value())
+        {
+            request_handle_ptr->SetResponseWaitTime(response_wait_time.value());
+        }
         
         return RequestHandle { *this, std::move(request_handle_ptr) };
     }
