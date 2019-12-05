@@ -3,7 +3,6 @@
 #include "lift/RequestHandle.h"
 
 #include <cstring>
-#include <iostream>
 
 namespace lift {
 auto curl_write_header(
@@ -72,6 +71,26 @@ auto Request::init() -> void
     m_response_headers_idx.reserve(HEADER_DEFAULT_COUNT);
     m_response_data.reserve(HEADER_DEFAULT_MEMORY_BYTES);
 }
+
+auto Request::setTotalTime(bool had_response_wait_time_timeout) -> void
+{
+    if (had_response_wait_time_timeout)
+    {
+        m_total_time.emplace(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_start_time)
+            );
+    }
+    else
+    {
+        constexpr uint64_t SEC_2_MS = 1000;
+
+        double total_time = 0;
+        curl_easy_getinfo(m_curl_handle, CURLINFO_TOTAL_TIME, &total_time);
+        m_total_time.emplace(std::chrono::milliseconds{static_cast<int64_t>(total_time * SEC_2_MS)});
+    }
+}
+
+
 
 auto Request::SetOnCompleteHandler(
     std::function<void(RequestHandle)> on_complete_handler) -> void
@@ -324,15 +343,6 @@ auto Request::GetResponseData() const -> const std::string&
     return m_response_data;
 }
 
-auto Request::GetTotalTime() const -> std::chrono::milliseconds
-{
-    constexpr uint64_t SEC_2_MS = 1000;
-
-    double total_time = 0;
-    curl_easy_getinfo(m_curl_handle, CURLINFO_TOTAL_TIME, &total_time);
-    return std::chrono::milliseconds(static_cast<int64_t>(total_time * SEC_2_MS));
-}
-
 auto Request::GetCompletionStatus() const -> RequestStatus
 {
     return m_status_code;
@@ -392,7 +402,6 @@ auto Request::Reset() -> void
     }
 
     clearResponseBuffers();
-
     curl_easy_reset(m_curl_handle);
     init();
     m_status_code = RequestStatus::BUILDING;
@@ -497,6 +506,8 @@ auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> s
             // But if the request did time out, set the on complete handler will know.
             m_status_code = RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT;
         }
+
+        setTotalTime(response_wait_time_timeout);
         
         if (m_on_complete_handler != nullptr)
         {

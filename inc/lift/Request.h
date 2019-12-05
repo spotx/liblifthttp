@@ -11,7 +11,6 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
-#include <iostream>
 #include <set>
 #include <string>
 #include <string_view>
@@ -239,7 +238,10 @@ public:
      * @return The total HTTP request time in milliseconds.
      */
     [[nodiscard]]
-    auto GetTotalTime() const -> std::chrono::milliseconds;
+    auto GetTotalTime() const -> const std::optional<std::chrono::milliseconds>&
+    {
+        return m_total_time;
+    }
 
     /**
      * The completion status is how the request ended up in the event loop.
@@ -306,6 +308,24 @@ private:
 
     auto init() -> void;
 
+    /**
+     * Sets the timepoint for when the request started -- we want this is set so we can calculate how long the 
+     * request took in the event there is a response wait time timeout.
+     */
+    auto setStartTime() -> void
+    {
+        m_start_time = std::chrono::steady_clock::now();
+    }
+
+    /**
+     * Sets m_total_time by either getting the total time from cURL (when the request did NOT
+     * time out due to response wait time) or by finding the druation from when the request started
+     * to now (when the request did NOT time out due to response wait time).
+     * @param had_response_wait_time_timeout Bool indicating whether the request timed out due to
+     *                                       response wait time (true) or not not (false)
+     */
+    auto setTotalTime(bool had_response_wait_time_timeout) -> void;
+
     /// The onComplete() handler for asynchronous requests.
     std::function<void(RequestHandle)> m_on_complete_handler;
 
@@ -343,6 +363,15 @@ private:
     ssize_t m_max_download_bytes { 0 };
     /// Number of bytes that have been written so far.
     ssize_t m_bytes_written { 0 };
+
+    /**
+     * The timepoint for when the request started -- we want this is set so we can calculate how long the 
+     * request took in the event there is a response wait time timeout.
+     */
+    std::chrono::steady_clock::time_point m_start_time;
+
+    /// The total time it took to receive a response -- will only be set once we receive a response.
+    std::optional<std::chrono::milliseconds> m_total_time;
     
     /**
      * Bool indicating whether or not onComplete has been called (true) or not (false) so if a request exceeds
