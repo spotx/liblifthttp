@@ -72,13 +72,11 @@ auto Request::init() -> void
     m_response_data.reserve(HEADER_DEFAULT_MEMORY_BYTES);
 }
 
-auto Request::setTotalTime(bool had_response_wait_time_timeout) -> void
+auto Request::setTotalTime(std::optional<uint64_t> finish_time) -> void
 {
-    if (had_response_wait_time_timeout)
+    if (finish_time.has_value())
     {
-        m_total_time.emplace(
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_start_time)
-            );
+        m_total_time.emplace(std::chrono::milliseconds{finish_time.value() - m_start_time});
     }
     else
     {
@@ -494,20 +492,20 @@ auto Request::setCompletionStatus(
 #pragma GCC diagnostic pop
 }
 
-auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout) -> void
+auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time) -> void
 {
     auto request_handle_ptr = RequestHandle(std::move(shared_request));
     
     // We only call the stored on complete function once!
     if (!m_on_complete_has_been_called.exchange(true, std::memory_order_acquire))
     {
-        if (response_wait_time_timeout)
+        if (finish_time.has_value())
         {
             // But if the request did time out, set the on complete handler will know.
             m_status_code = RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT;
         }
 
-        setTotalTime(response_wait_time_timeout);
+        setTotalTime(finish_time);
         
         if (m_on_complete_handler != nullptr)
         {

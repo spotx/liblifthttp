@@ -311,20 +311,24 @@ private:
     /**
      * Sets the timepoint for when the request started -- we want this is set so we can calculate how long the 
      * request took in the event there is a response wait time timeout.
+     * @param start_time uint64_t indicating the timepoint when the request was started. Using a uint64_t as 
+     *                   this is the type libuv uses for time points.
      */
-    auto setStartTime() -> void
+    auto setStartTime(uint64_t start_time) -> void
     {
-        m_start_time = std::chrono::steady_clock::now();
+        m_start_time = start_time;
     }
 
     /**
      * Sets m_total_time by either getting the total time from cURL (when the request did NOT
      * time out due to response wait time) or by finding the druation from when the request started
      * to now (when the request did NOT time out due to response wait time).
-     * @param had_response_wait_time_timeout Bool indicating whether the request timed out due to
-     *                                       response wait time (true) or not not (false)
+     * @param finish_time Optional that will contain a uint64_t indicating the timepoint when
+     *                    the request was timed out while waiting for the response time.
+     *                    If the request received a response or timed out via cURL, this will be
+     *                    empty and we'll get the total time from the cURL handle.
      */
-    auto setTotalTime(bool had_response_wait_time_timeout) -> void;
+    auto setTotalTime(std::optional<uint64_t> finish_time) -> void;
 
     /// The onComplete() handler for asynchronous requests.
     std::function<void(RequestHandle)> m_on_complete_handler;
@@ -367,8 +371,9 @@ private:
     /**
      * The timepoint for when the request started -- we want this is set so we can calculate how long the 
      * request took in the event there is a response wait time timeout.
+     * We're using a uint64_t since we get the timepoint from libuv and it uses uint64_t.
      */
-    std::chrono::steady_clock::time_point m_start_time;
+    uint64_t  m_start_time{0};
 
     /// The total time it took to receive a response -- will only be set once we receive a response.
     std::optional<std::chrono::milliseconds> m_total_time;
@@ -417,11 +422,13 @@ private:
      * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
      *          response wait times can be removed from the multiset of ResponseWaitTimeWrapper)
      * @param shared_request Shared pointer to the SharedRequest that owns this Request, so it can be used to create
-     *          a RequestHandle and return the Request to the RequestPool if necessary.
-     * @param response_wait_time_timeout Bool indicating whether or not onComplete was called because
-     *          a response wait time was exceeded (true) or not (false)
+     *                       a RequestHandle and return the Request to the RequestPool if necessary.
+     * @param finish_time Optional that will contain a uint64_t indicating the timepoint when request was timed out 
+     *                    while waiting for the response time.  If the request received a response or timed out via 
+     *                    cURL, this will be empty and we'll get the total time from the cURL handle.
+     *                    Default is an empty optional.
      */
-    auto onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout = false) -> void;
+    auto onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time = std::nullopt) -> void;
 
     /**
      * Helper function to find how many bytes are left to be downloaded for a request

@@ -219,7 +219,7 @@ auto EventLoop::stopTimedOutRequests() -> void
 
         // Call onComplete on the underlying Request object, copying in the shared_pointer
         // so we get a correct reference count.
-        shared_request->GetAsReference().onComplete(*this, shared_request, true);
+        shared_request->GetAsReference().onComplete(*this, shared_request, now);
     }
 
     // If there are still items in the multiset, get the first item and use its time to reset the request timer.
@@ -442,14 +442,14 @@ auto requests_accept_async(uv_async_t* handle) -> void
     {
         auto& raw_request = *request_handle;
 
+        // Get the current timepoint from libuv (it caches the current timepoint at the beginning
+        // of every cycle through the event loop, so this should not be expensive).
+        auto time = uv_now(event_loop->m_loop);
+
         // If there's a response wait time, we'll need to create a ResponseWaitTimeWrapper and add
         // it to the wrapper multiset so it can be handled in the event it takes too long to respond.
         if (const auto& response_wait_time_opt = raw_request.GetResponseWaitTime(); response_wait_time_opt.has_value())
         {
-            // Get the current timepoint from libuv (it caches the current timepoint at the beginning
-            // of every cycle through the event loop, so this should not be expensive).
-            auto time = uv_now(event_loop->m_loop);
-
             const auto request_timeout = response_wait_time_opt.value();
             auto next_timepoint = time + static_cast<uint64_t>(request_timeout.count());
 
@@ -479,7 +479,7 @@ auto requests_accept_async(uv_async_t* handle) -> void
         // curl_multi_add_handle does not return an error.)
         request_handle->setSharedPointerOnCurlHandle(shared_request_on_heap.get());
 
-        request_handle->setStartTime();
+        request_handle->setStartTime(time);
         auto curl_code = curl_multi_add_handle(event_loop->m_cmh, raw_request.m_curl_handle);
 
         if(curl_code != CURLM_OK && curl_code != CURLM_CALL_MULTI_PERFORM)
