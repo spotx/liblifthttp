@@ -235,7 +235,8 @@ public:
     auto GetResponseData() const -> const std::string&;
 
     /**
-     * @return The total HTTP request time in milliseconds.
+     * @return The total HTTP request time in milliseconds as an optional (will be empty
+     *          if the request has not finished yet).
      */
     [[nodiscard]]
     auto GetTotalTime() const -> const std::optional<std::chrono::milliseconds>&
