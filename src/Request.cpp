@@ -38,6 +38,10 @@ Request::Request(
     {
         SetResponseWaitTime(response_wait_time.value());
     }
+
+    // Set the private pointer in the curl handle to a nullptr, because we want to
+    // set it explicity for every new SharedRequest in requests_accept_async.
+    setSharedPointerOnCurlHandle(nullptr);
 }
 
 Request::~Request()
@@ -60,6 +64,10 @@ auto Request::init() -> void
     curl_easy_setopt(m_curl_handle, CURLOPT_WRITEDATA, this);
     curl_easy_setopt(m_curl_handle, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(m_curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
+
+    // Set the private pointer in the curl handle to a nullptr, because the shared_request
+    // it's pointing to should now be destructed.
+    setSharedPointerOnCurlHandle(nullptr);
 
     SetMaxDownloadBytes(m_max_download_bytes);
 
@@ -406,7 +414,7 @@ auto Request::Reset() -> void
 
     m_max_download_bytes = -1; // Set max download bytes to default to download entire file
     m_bytes_written = 0;
-    
+
     m_on_complete_has_been_called.store(false);
     m_response_wait_time.reset();
     m_response_wait_time_set_iterator.reset();
@@ -495,7 +503,7 @@ auto Request::setCompletionStatus(
 auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time) -> void
 {
     auto request_handle_ptr = RequestHandle(std::move(shared_request));
-    
+
     // We only call the stored on complete function once!
     if (!m_on_complete_has_been_called.exchange(true, std::memory_order_acquire))
     {
@@ -506,14 +514,14 @@ auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> s
         }
 
         setTotalTime(finish_time);
-        
+
         if (m_on_complete_handler != nullptr)
         {
             // Call the on complete handler with a reference to the request.
             m_on_complete_handler(std::move(request_handle_ptr));
         }
     }
-    
+
     // If we have an iterator, remove it from the set so we won't try to time it out and then call onComplete again.
     if (m_response_wait_time_set_iterator.has_value())
     {
@@ -533,7 +541,7 @@ auto curl_write_header(
     void* user_ptr) -> size_t
 {
     auto* raw_request_ptr = static_cast<Request*>(user_ptr);
-    
+
     // If we've already called the on complete handler, the request might still be in userland,
     // so we don't want to modify it.
     if (raw_request_ptr->m_on_complete_has_been_called.load())

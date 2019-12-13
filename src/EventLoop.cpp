@@ -2,6 +2,7 @@
 
 #include <curl/multi.h>
 
+#include <cassert>
 #include <chrono>
 #include <thread>
 
@@ -282,17 +283,27 @@ auto EventLoop::checkActions(
 
             // So the reacquired shared_ptr destructs itself correctly, let's get it into a unique pointer
             std::shared_ptr<SharedRequest>* curl_info_private_pointer{nullptr};
-            curl_easy_getinfo(easy_handle, CURLINFO_PRIVATE, &curl_info_private_pointer);
+            auto result = curl_easy_getinfo(easy_handle, CURLINFO_PRIVATE, &curl_info_private_pointer);
             curl_multi_remove_handle(m_cmh, easy_handle);
 
-            std::unique_ptr<std::shared_ptr<SharedRequest>> shared_request_ptr_pointer{curl_info_private_pointer};
+            if (result == CURLE_OK && curl_info_private_pointer != nullptr)
+            {
 
-            auto shared_request_ptr = *shared_request_ptr_pointer;
+                std::unique_ptr<std::shared_ptr<SharedRequest>> shared_request_ptr_pointer{curl_info_private_pointer};
 
-            shared_request_ptr->GetAsReference().setCompletionStatus(easy_result);
-            shared_request_ptr->GetAsReference().onComplete(*this, shared_request_ptr);
+                auto shared_request_ptr = *shared_request_ptr_pointer;
+                auto& shared_request_ref = shared_request_ptr->GetAsReference();
 
-            --m_active_request_count;
+                shared_request_ref.setCompletionStatus(easy_result);
+                shared_request_ref.onComplete(*this, shared_request_ptr);
+
+                --m_active_request_count;
+            }
+            else
+            {
+                assert(result == CURLE_OK);
+                assert(curl_info_private_pointer != nullptr);
+            }
         }
     }
 }
