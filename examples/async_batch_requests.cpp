@@ -8,12 +8,14 @@
 
 static auto on_complete(lift::RequestHandle request_handle) -> void
 {
+    using namespace std::chrono_literals;
+
     auto& request = *request_handle;
     switch (request.GetCompletionStatus()) {
     case lift::RequestStatus::SUCCESS:
         std::cout
             << "Completed " << request.GetUrl()
-            << " ms:" << request.GetTotalTime().count() << std::endl;
+            << " ms:" << request.GetTotalTime().value_or(0ms).count() << std::endl;
         break;
     case lift::RequestStatus::CONNECT_ERROR:
         std::cout << "Unable to connect to: " << request.GetUrl() << std::endl;

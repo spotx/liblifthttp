@@ -8,11 +8,13 @@
 
 static auto on_complete(lift::RequestHandle request_handle) -> void
 {
+    using namespace std::chrono_literals;
+
     auto& request = *request_handle;
     if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         std::cout
             << "Completed " << request.GetUrl()
-            << " ms:" << request.GetTotalTime().count() << std::endl;
+            << " ms:" << request.GetTotalTime().value_or(0ms).count() << std::endl;
     } else {
         std::cout
             << "Error: " << request.GetUrl() << " : "

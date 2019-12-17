@@ -3,7 +3,6 @@
 #include "lift/RequestHandle.h"
 
 #include <cstring>
-#include <iostream>
 
 namespace lift {
 auto curl_write_header(
@@ -62,6 +61,10 @@ auto Request::init() -> void
     curl_easy_setopt(m_curl_handle, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(m_curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
 
+    // Set the private pointer in the curl handle to a nullptr, because the shared_request
+    // it's pointing to should now be destructed.
+    setSharedPointerOnCurlHandle(nullptr);
+
     SetMaxDownloadBytes(m_max_download_bytes);
 
     m_request_headers.reserve(HEADER_DEFAULT_MEMORY_BYTES);
@@ -72,6 +75,24 @@ auto Request::init() -> void
     m_response_headers_idx.reserve(HEADER_DEFAULT_COUNT);
     m_response_data.reserve(HEADER_DEFAULT_MEMORY_BYTES);
 }
+
+auto Request::setTotalTime(std::optional<uint64_t> finish_time) -> void
+{
+    if (finish_time.has_value())
+    {
+        m_total_time.emplace(std::chrono::milliseconds{finish_time.value() - m_start_time});
+    }
+    else
+    {
+        double total_time = 0;
+        curl_easy_getinfo(m_curl_handle, CURLINFO_TOTAL_TIME, &total_time);
+
+        // std::duration defaults to seconds, so don't need to duration_cast total time to seconds.
+        m_total_time.emplace(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::duration<double>{total_time}));
+    }
+}
+
+
 
 auto Request::SetOnCompleteHandler(
     std::function<void(RequestHandle)> on_complete_handler) -> void
@@ -324,15 +345,6 @@ auto Request::GetResponseData() const -> const std::string&
     return m_response_data;
 }
 
-auto Request::GetTotalTime() const -> std::chrono::milliseconds
-{
-    constexpr uint64_t SEC_2_MS = 1000;
-
-    double total_time = 0;
-    curl_easy_getinfo(m_curl_handle, CURLINFO_TOTAL_TIME, &total_time);
-    return std::chrono::milliseconds(static_cast<int64_t>(total_time * SEC_2_MS));
-}
-
 auto Request::GetCompletionStatus() const -> RequestStatus
 {
     return m_status_code;
@@ -392,14 +404,13 @@ auto Request::Reset() -> void
     }
 
     clearResponseBuffers();
-
     curl_easy_reset(m_curl_handle);
     init();
     m_status_code = RequestStatus::BUILDING;
 
     m_max_download_bytes = -1; // Set max download bytes to default to download entire file
     m_bytes_written = 0;
-    
+
     m_on_complete_has_been_called.store(false);
     m_response_wait_time.reset();
     m_response_wait_time_set_iterator.reset();
@@ -485,26 +496,28 @@ auto Request::setCompletionStatus(
 #pragma GCC diagnostic pop
 }
 
-auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, bool response_wait_time_timeout) -> void
+auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time) -> void
 {
     auto request_handle_ptr = RequestHandle(std::move(shared_request));
-    
+
     // We only call the stored on complete function once!
     if (!m_on_complete_has_been_called.exchange(true, std::memory_order_acquire))
     {
-        if (response_wait_time_timeout)
+        if (finish_time.has_value())
         {
             // But if the request did time out, set the on complete handler will know.
             m_status_code = RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT;
         }
-        
+
+        setTotalTime(finish_time);
+
         if (m_on_complete_handler != nullptr)
         {
             // Call the on complete handler with a reference to the request.
             m_on_complete_handler(std::move(request_handle_ptr));
         }
     }
-    
+
     // If we have an iterator, remove it from the set so we won't try to time it out and then call onComplete again.
     if (m_response_wait_time_set_iterator.has_value())
     {
@@ -524,7 +537,7 @@ auto curl_write_header(
     void* user_ptr) -> size_t
 {
     auto* raw_request_ptr = static_cast<Request*>(user_ptr);
-    
+
     // If we've already called the on complete handler, the request might still be in userland,
     // so we don't want to modify it.
     if (raw_request_ptr->m_on_complete_has_been_called.load())

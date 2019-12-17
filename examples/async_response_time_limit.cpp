@@ -10,11 +10,13 @@ static uint64_t response_count{0};
 
 static auto on_complete(lift::RequestHandle request_handle) -> void
 {
+    using namespace std::chrono_literals;
+
     auto& request = *request_handle;
     std::cout << "For request with url " << request.GetUrl() << ", ";
     if (request.GetCompletionStatus() == lift::RequestStatus::SUCCESS) {
         ++response_count;
-        std::cout << "requested was successfully completed in " << request.GetTotalTime().count() << " ms" << std::endl;
+        std::cout << "requested was successfully completed in " << request.GetTotalTime().value_or(0ms).count() << " ms" << std::endl;
         std::cout << "Received response body was: " << request.GetResponseData() << std::endl;
     } else {
         ++timeout_count;
