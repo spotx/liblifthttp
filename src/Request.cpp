@@ -38,10 +38,6 @@ Request::Request(
     {
         SetResponseWaitTime(response_wait_time.value());
     }
-
-    // Set the private pointer in the curl handle to a nullptr, because we want to
-    // set it explicity for every new SharedRequest in requests_accept_async.
-    setSharedPointerOnCurlHandle(nullptr);
 }
 
 Request::~Request()
@@ -88,11 +84,11 @@ auto Request::setTotalTime(std::optional<uint64_t> finish_time) -> void
     }
     else
     {
-        constexpr uint64_t SEC_2_MS = 1000;
-
         double total_time = 0;
         curl_easy_getinfo(m_curl_handle, CURLINFO_TOTAL_TIME, &total_time);
-        m_total_time.emplace(std::chrono::milliseconds{static_cast<int64_t>(total_time * SEC_2_MS)});
+
+        // std::duration defaults to seconds, so don't need to duration_cast total time to seconds.
+        m_total_time.emplace(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::duration<double>{total_time}));
     }
 }
 
