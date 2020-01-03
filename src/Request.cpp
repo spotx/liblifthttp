@@ -454,6 +454,13 @@ auto Request::clearResponseBuffers() -> void
 auto Request::setCompletionStatus(
     CURLcode curl_code) -> void
 {
+    // EventLoop's checkActions will call setCompletionStatus even If we have already timed out due to
+    // response wait time, but want to preserve the RESPONSE_WAIT_TIME_TIMEOUT status for the user, so
+    // if m_status_code is set to RESPONSE_WAIT_TIME_TIMEOUT, don't overwrite it.
+    if (m_status_code == RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT)
+    {
+        return;
+    }
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch-enum"
