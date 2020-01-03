@@ -324,7 +324,7 @@ auto Request::Perform() -> bool
 {
     prepareForPerform();
     auto curl_error_code = curl_easy_perform(m_curl_handle);
-    setCompletionStatus(curl_error_code);
+    m_status_code = convertCompletionStatus(curl_error_code);
     return (m_status_code == RequestStatus::SUCCESS);
 }
 
@@ -451,52 +451,41 @@ auto Request::clearResponseBuffers() -> void
     m_response_data.clear();
 }
 
-auto Request::setCompletionStatus(
-    CURLcode curl_code) -> void
+auto Request::convertCompletionStatus(CURLcode curl_code) -> RequestStatus
 {
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch-enum"
     switch (curl_code) {
     case CURLcode::CURLE_OK:
-        m_status_code = RequestStatus::SUCCESS;
-        break;
+        return RequestStatus::SUCCESS;
     case CURLcode::CURLE_GOT_NOTHING:
-        m_status_code = RequestStatus::RESPONSE_EMPTY;
-        break;
+        return RequestStatus::RESPONSE_EMPTY;
     case CURLcode::CURLE_OPERATION_TIMEDOUT:
-        m_status_code = RequestStatus::TIMEOUT;
-        break;
+        return RequestStatus::TIMEOUT;
     case CURLcode::CURLE_COULDNT_CONNECT:
-        m_status_code = RequestStatus::CONNECT_ERROR;
-        break;
+        return RequestStatus::CONNECT_ERROR;
     case CURLcode::CURLE_COULDNT_RESOLVE_HOST:
-        m_status_code = RequestStatus::CONNECT_DNS_ERROR;
-        break;
+        return RequestStatus::CONNECT_DNS_ERROR;
     case CURLcode::CURLE_SSL_CONNECT_ERROR:
-        m_status_code = RequestStatus::CONNECT_SSL_ERROR;
-        break;
+        return RequestStatus::CONNECT_SSL_ERROR;
     case CURLcode::CURLE_WRITE_ERROR:
         /**
          * If there is a cURL write error, but the maximum number of bytes has been written,
          * then we intentionally aborted, so let's set this to success.
          * Otherwise, there was an error in the CURL write callback.
          */
-        m_status_code = (getRemainingDownloadBytes() == 0)
+        return (getRemainingDownloadBytes() == 0)
             ? RequestStatus::SUCCESS
             : RequestStatus::DOWNLOAD_ERROR;
-        break;
     case CURLcode::CURLE_SEND_ERROR:
-        m_status_code = RequestStatus::ERROR_FAILED_TO_START;
-        break;
+        return RequestStatus::ERROR_FAILED_TO_START;
     default:
-        m_status_code = RequestStatus::ERROR;
-        break;
+        return RequestStatus::ERROR;
     }
 #pragma GCC diagnostic pop
 }
 
-auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time) -> void
+auto Request::onComplete(EventLoop& event_loop, RequestStatus completion_status, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time) -> void
 {
     auto request_handle_ptr = RequestHandle(std::move(shared_request));
 
@@ -510,6 +499,7 @@ auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> s
         }
 
         setTotalTime(finish_time);
+        m_status_code = completion_status;
 
         if (m_on_complete_handler != nullptr)
         {
