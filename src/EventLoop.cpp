@@ -220,7 +220,7 @@ auto EventLoop::stopTimedOutRequests() -> void
 
         // Call onComplete on the underlying Request object, copying in the shared_pointer
         // so we get a correct reference count.
-        shared_request->GetAsReference().onComplete(*this, shared_request, now);
+        shared_request->GetAsReference().onComplete(*this, RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT, shared_request, now);
     }
 
     // If there are still items in the multiset, get the first item and use its time to reset the request timer.
@@ -294,8 +294,7 @@ auto EventLoop::checkActions(
                 auto shared_request_ptr = *shared_request_ptr_pointer;
                 auto& shared_request_ref = shared_request_ptr->GetAsReference();
 
-                shared_request_ref.setCompletionStatus(easy_result);
-                shared_request_ref.onComplete(*this, shared_request_ptr);
+                shared_request_ref.onComplete(*this, shared_request_ref.convertCompletionStatus(easy_result), shared_request_ptr);
 
                 --m_active_request_count;
             }
@@ -495,14 +494,11 @@ auto requests_accept_async(uv_async_t* handle) -> void
 
         if(curl_code != CURLM_OK && curl_code != CURLM_CALL_MULTI_PERFORM)
         {
-            /**
-             * If curl_multi_add_handle fails then notify the user that the request failed to start
-             * immediately.
+            /*
+             * If curl_multi_add_handle fails then notify the user that the request failed to start immediately.
+             * If we are calling onComplete now, move the shared_ptr into the method so it cleans itself up correctly.
              */
-            request_handle->setCompletionStatus(CURLcode::CURLE_SEND_ERROR);
-
-            // If we are calling onComplete now, move the shared_ptr into the method so it cleans itself up correctly.
-            request_handle->onComplete(*event_loop, *shared_request_on_heap);
+            request_handle->onComplete(*event_loop, RequestStatus::ERROR_FAILED_TO_START, *shared_request_on_heap);
         }
         else
         {

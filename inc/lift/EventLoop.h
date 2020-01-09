@@ -271,16 +271,16 @@ private:
     /**
      * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
      *          response wait times can be removed from the multiset of ResponseWaitTimeWrapper)
+     * @param completion_status RequestStatus enum indicating the status of the lift Request when it has completed
+     *                          (Success, error, etc.).
      * @param shared_request Shared pointer to the SharedRequest that owns this Request, so it can be used to create
-     *          a RequestHandle and return the Request to the RequestPool if necessary.
-     * @param response_wait_time_timeout Bool indicating whether or not onComplete was called because
-     *          a response wait time was exceeded (true) or not (false)
-     * @param finish_time Optional that will contain a uint64_t indicating the timepoint when
-     *                    the request was timed out while waiting for the response time.
-     *                    If the request received a response or timed out via cURL, this will be
-     *                    empty and we'll get the total time from the cURL handle.
+     *                       a RequestHandle and return the Request to the RequestPool if necessary.
+     * @param finish_time Optional that will contain a uint64_t indicating the timepoint when request was timed out
+     *                    while waiting for the response time.  If the request received a response or timed out via
+     *                    cURL, this will be empty and we'll get the total time from the cURL handle.
+     *                    Default is an empty optional.
      */
-    friend auto Request::onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time) -> void;
+    friend auto Request::onComplete(EventLoop& event_loop, RequestStatus completion_status, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time) -> void;
 };
 
 } // lift

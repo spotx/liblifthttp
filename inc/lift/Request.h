@@ -415,13 +415,15 @@ private:
     /**
      * Converts a CURLcode into a RequestStatus.
      * @param curl_code The CURLcode to convert.
+     * @return The lift RequestStatus that corresponds to the CURLcode
      */
-    auto setCompletionStatus(
-        CURLcode curl_code) -> void;
+    auto convertCompletionStatus(CURLcode curl_code) -> RequestStatus;
     
     /**
      * @param event_loop Reference to the EventLoop that is calling onComplete (so requests that have
      *          response wait times can be removed from the multiset of ResponseWaitTimeWrapper)
+     * @param completion_status RequestStatus enum indicating the status of the lift Request when it has completed
+     *                          (Success, error, etc.).
      * @param shared_request Shared pointer to the SharedRequest that owns this Request, so it can be used to create
      *                       a RequestHandle and return the Request to the RequestPool if necessary.
      * @param finish_time Optional that will contain a uint64_t indicating the timepoint when request was timed out 
@@ -429,7 +431,7 @@ private:
      *                    cURL, this will be empty and we'll get the total time from the cURL handle.
      *                    Default is an empty optional.
      */
-    auto onComplete(EventLoop& event_loop, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time = std::nullopt) -> void;
+    auto onComplete(EventLoop& event_loop, RequestStatus completion_status, std::shared_ptr<SharedRequest> shared_request, std::optional<uint64_t> finish_time = std::nullopt) -> void;
 
     /**
      * Helper function to find how many bytes are left to be downloaded for a request
