@@ -325,14 +325,13 @@ auto Request::Perform() -> bool
     prepareForPerform();
     auto curl_error_code = curl_easy_perform(m_curl_handle);
     m_status_code = convertCompletionStatus(curl_error_code);
+    setHttpStatusCodeFromCurl();
     return (m_status_code == RequestStatus::SUCCESS);
 }
 
 auto Request::GetResponseStatusCode() const -> http::StatusCode
 {
-    long http_response_code = 0;
-    curl_easy_getinfo(m_curl_handle, CURLINFO_RESPONSE_CODE, &http_response_code);
-    return http::to_enum(static_cast<uint32_t>(http_response_code));
+    return m_http_status_code;
 }
 
 auto Request::GetResponseHeaders() const -> const std::vector<Header>&
@@ -496,10 +495,15 @@ auto Request::onComplete(EventLoop& event_loop, RequestStatus completion_status,
         {
             // But if the request did time out, set the on complete handler will know.
             m_status_code = RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT;
+            m_http_status_code = http::StatusCode::HTTP_504_GATEWAY_TIMEOUT;
+        }
+        else
+        {
+            m_status_code = completion_status;
+            setHttpStatusCodeFromCurl();
         }
 
         setTotalTime(finish_time);
-        m_status_code = completion_status;
 
         if (m_on_complete_handler != nullptr)
         {
@@ -518,6 +522,13 @@ auto Request::onComplete(EventLoop& event_loop, RequestStatus completion_status,
 auto Request::getRemainingDownloadBytes() -> ssize_t
 {
     return m_max_download_bytes - m_bytes_written;
+}
+
+auto Request::setHttpStatusCodeFromCurl() -> void
+{
+    long http_response_code = 0;
+    curl_easy_getinfo(m_curl_handle, CURLINFO_RESPONSE_CODE, &http_response_code);
+    m_http_status_code = http::to_enum(static_cast<uint32_t>(http_response_code));
 }
 
 auto curl_write_header(
