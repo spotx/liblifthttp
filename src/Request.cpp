@@ -416,6 +416,20 @@ auto Request::Reset() -> void
     m_response_wait_time_set_iterator.reset();
 }
 
+auto Request::GetRedirectCount() const -> uint64_t
+{
+    if (m_status_code == RequestStatus::SUCCESS)
+    {
+        long redirects;
+        auto curl_code = curl_easy_getinfo(m_curl_handle, CURLINFO_REDIRECT_COUNT, &redirects);
+        if (curl_code == CURLE_OK && redirects > 0)
+        {
+            return static_cast<uint64_t>(redirects);
+        }
+    }
+    return 0;
+}
+
 auto Request::prepareForPerform() -> void
 {
     clearResponseBuffers();
