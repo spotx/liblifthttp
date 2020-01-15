@@ -284,6 +284,15 @@ public:
      * Resets the request to be re-used.  This will clear everything on the request.
      */
     auto Reset() -> void;
+
+    /**
+     * The redirect count is the number of redirections that were actually followed by the request.
+     *
+     * @return Gets the request redirect count.
+     */
+    [[nodiscard]]
+    auto GetRedirectCount() const -> uint64_t;
+
 private:
     /**
      * Private constructor -- only the RequestPool can create new Requests.
