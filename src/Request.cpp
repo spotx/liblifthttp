@@ -411,6 +411,7 @@ auto Request::Reset() -> void
     m_bytes_written = 0;
 
     m_on_complete_has_been_called.store(false);
+    m_http_status_code = http::StatusCode::HTTP_504_GATEWAY_TIMEOUT;
     m_response_wait_time.reset();
     m_response_wait_time_set_iterator.reset();
 }
@@ -441,6 +442,7 @@ auto Request::prepareForPerform() -> void
     }
 
     m_status_code = RequestStatus::EXECUTING;
+    m_total_time.reset();
 }
 
 auto Request::clearResponseBuffers() -> void
@@ -605,6 +607,13 @@ auto curl_write_data(
 {
     auto* raw_request_ptr = static_cast<Request*>(user_ptr);
     size_t data_length = size * nitems;
+
+    // If we've already called the on complete handler, the request might still be in userland,
+    // so we don't want to modify it.
+    if (raw_request_ptr->m_on_complete_has_been_called.load())
+    {
+        return 0;
+    }
 
     // If m_max_download_bytes is greater than -1, we are performing partial download.
     if (raw_request_ptr->m_max_download_bytes > -1) {
