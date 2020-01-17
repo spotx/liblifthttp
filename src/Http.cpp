@@ -86,8 +86,9 @@ static const std::string STATUS_CODE_HTTP_421_MISDIRECTED_REQUEST = "421 Misdire
 static const std::string STATUS_CODE_HTTP_422_UNPROCESSABLE_ENTITY = "422 Unprocessable Entity"s;
 static const std::string STATUS_CODE_HTTP_423_LOCKED = "423 Locked"s;
 static const std::string STATUS_CODE_HTTP_424_FAILED_DEPENDENCY = "424 Failed Dependency"s;
+static const std::string STATUS_CODE_HTTP_425_TOO_EARLY = "425 Too Early"s;
 static const std::string STATUS_CODE_HTTP_426_UPGRADE_REQUIRED = "426 Upgrade Required"s;
-static const std::string STATUS_CODE_HTTP_428_PRECONDITION_FAILED = "428 Precondition Required"s;
+static const std::string STATUS_CODE_HTTP_428_PRECONDITION_REQUIRED = "428 Precondition Required"s;
 static const std::string STATUS_CODE_HTTP_429_TOO_MANY_REQUESTS = "429 Too Many Requests"s;
 static const std::string STATUS_CODE_HTTP_431_REQUEST_HEADER_FIELDS_TOO_LARGE = "431 Request Header Fields Too Large"s;
 static const std::string STATUS_CODE_HTTP_451_UNAVAILABLE_FOR_LEGAL_REASONS = "451 Unavailable For Legal Reasons"s;
@@ -203,10 +204,12 @@ auto to_string(
         return STATUS_CODE_HTTP_423_LOCKED;
     case StatusCode::HTTP_424_FAILED_DEPENDENCY:
         return STATUS_CODE_HTTP_424_FAILED_DEPENDENCY;
+    case StatusCode::HTTP_425_TOO_EARLY:
+        return STATUS_CODE_HTTP_425_TOO_EARLY;
     case StatusCode::HTTP_426_UPGRADE_REQUIRED:
         return STATUS_CODE_HTTP_426_UPGRADE_REQUIRED;
-    case StatusCode::HTTP_428_PRECONDITION_FAILED:
-        return STATUS_CODE_HTTP_428_PRECONDITION_FAILED;
+    case StatusCode::HTTP_428_PRECONDITION_REQUIRED:
+        return STATUS_CODE_HTTP_428_PRECONDITION_REQUIRED;
     case StatusCode::HTTP_429_TOO_MANY_REQUESTS:
         return STATUS_CODE_HTTP_429_TOO_MANY_REQUESTS;
     case StatusCode::HTTP_431_REQUEST_HEADER_FIELDS_TOO_LARGE:
@@ -342,7 +345,7 @@ auto to_enum(int32_t code) -> StatusCode
         case 426:
             return StatusCode::HTTP_426_UPGRADE_REQUIRED;
         case 428:
-            return StatusCode::HTTP_428_PRECONDITION_FAILED;
+            return StatusCode::HTTP_428_PRECONDITION_REQUIRED;
         case 429:
             return StatusCode::HTTP_429_TOO_MANY_REQUESTS;
         case 431:
