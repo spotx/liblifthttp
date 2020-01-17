@@ -112,8 +112,7 @@ auto to_string(
  * @param code The HTTP status code as an int.
  * @return StatusCode
  */
-auto to_enum(
-    uint32_t code) -> StatusCode;
+auto to_enum(int32_t code) -> StatusCode;
 
 /**
  * HTTP 'Content-Type" types.  Can be extended to support

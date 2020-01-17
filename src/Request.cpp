@@ -530,7 +530,7 @@ auto Request::setHttpStatusCodeFromCurl() -> void
 {
     long http_response_code = 0;
     curl_easy_getinfo(m_curl_handle, CURLINFO_RESPONSE_CODE, &http_response_code);
-    m_http_status_code = http::to_enum(static_cast<uint32_t>(http_response_code));
+    m_http_status_code = http::to_enum(static_cast<int32_t>(http_response_code));
 }
 
 auto curl_write_header(
