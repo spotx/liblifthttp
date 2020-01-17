@@ -399,7 +399,7 @@ private:
     std::optional<std::multiset<ResponseWaitTimeWrapper>::iterator> m_response_wait_time_set_iterator;
 
     /// HTTP status code for request -- will either be set from curl response or use default of 504 (indicating a timeout)
-    http::StatusCode m_http_status_code{http::StatusCode::HTTP_504_GATEWAY_TIMEOUT};
+    http::StatusCode m_http_status_code{http::StatusCode::HTTP_UNKNOWN};
 
     /**
      * Prepares the request to be performed.  This is called on a request

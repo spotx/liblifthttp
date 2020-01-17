@@ -39,6 +39,7 @@ auto to_string(
     }
 }
 
+static const std::string STATUS_CODE_UNKNOWN = "unknown"s;
 static const std::string STATUS_CODE_HTTP_100_CONTINUE = "100 Continue"s;
 static const std::string STATUS_CODE_HTTP_101_SWITCHING_PROTOCOLS = "101 Switching Protocols"s;
 static const std::string STATUS_CODE_HTTP_102_PROCESSING = "102 Processing"s;
@@ -108,6 +109,8 @@ auto to_string(
     StatusCode code) -> const std::string&
 {
     switch (code) {
+    case StatusCode::HTTP_UNKNOWN:
+        return STATUS_CODE_HTTP_UNKNOWN;
     case StatusCode::HTTP_100_CONTINUE:
         return STATUS_CODE_HTTP_100_CONTINUE;
     case StatusCode::HTTP_101_SWITCHING_PROTOCOLS:

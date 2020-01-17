@@ -31,6 +31,8 @@ enum class Version {
  * https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
  */
 enum class StatusCode : uint32_t {
+    HTTP_UNKNOWN = 0,
+
     HTTP_100_CONTINUE = 100,
     HTTP_101_SWITCHING_PROTOCOLS = 101,
     HTTP_102_PROCESSING = 102,
