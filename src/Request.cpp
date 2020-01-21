@@ -325,14 +325,13 @@ auto Request::Perform() -> bool
     prepareForPerform();
     auto curl_error_code = curl_easy_perform(m_curl_handle);
     m_status_code = convertCompletionStatus(curl_error_code);
+    setHttpStatusCodeFromCurl();
     return (m_status_code == RequestStatus::SUCCESS);
 }
 
 auto Request::GetResponseStatusCode() const -> http::StatusCode
 {
-    long http_response_code = 0;
-    curl_easy_getinfo(m_curl_handle, CURLINFO_RESPONSE_CODE, &http_response_code);
-    return http::to_enum(static_cast<uint32_t>(http_response_code));
+    return m_http_status_code;
 }
 
 auto Request::GetResponseHeaders() const -> const std::vector<Header>&
@@ -412,6 +411,7 @@ auto Request::Reset() -> void
     m_bytes_written = 0;
 
     m_on_complete_has_been_called.store(false);
+    m_http_status_code = http::StatusCode::HTTP_UNKNOWN;
     m_response_wait_time.reset();
     m_response_wait_time_set_iterator.reset();
 }
@@ -442,6 +442,7 @@ auto Request::prepareForPerform() -> void
     }
 
     m_status_code = RequestStatus::EXECUTING;
+    m_total_time.reset();
 }
 
 auto Request::clearResponseBuffers() -> void
@@ -496,10 +497,15 @@ auto Request::onComplete(EventLoop& event_loop, RequestStatus completion_status,
         {
             // But if the request did time out, set the on complete handler will know.
             m_status_code = RequestStatus::RESPONSE_WAIT_TIME_TIMEOUT;
+            m_http_status_code = http::StatusCode::HTTP_504_GATEWAY_TIMEOUT;
+        }
+        else
+        {
+            m_status_code = completion_status;
+            setHttpStatusCodeFromCurl();
         }
 
         setTotalTime(finish_time);
-        m_status_code = completion_status;
 
         if (m_on_complete_handler != nullptr)
         {
@@ -518,6 +524,13 @@ auto Request::onComplete(EventLoop& event_loop, RequestStatus completion_status,
 auto Request::getRemainingDownloadBytes() -> ssize_t
 {
     return m_max_download_bytes - m_bytes_written;
+}
+
+auto Request::setHttpStatusCodeFromCurl() -> void
+{
+    long http_response_code = 0;
+    curl_easy_getinfo(m_curl_handle, CURLINFO_RESPONSE_CODE, &http_response_code);
+    m_http_status_code = http::to_enum(static_cast<int32_t>(http_response_code));
 }
 
 auto curl_write_header(
@@ -594,6 +607,13 @@ auto curl_write_data(
 {
     auto* raw_request_ptr = static_cast<Request*>(user_ptr);
     size_t data_length = size * nitems;
+
+    // If we've already called the on complete handler, the request might still be in userland,
+    // so we don't want to modify it.
+    if (raw_request_ptr->m_on_complete_has_been_called.load())
+    {
+        return 0;
+    }
 
     // If m_max_download_bytes is greater than -1, we are performing partial download.
     if (raw_request_ptr->m_max_download_bytes > -1) {
