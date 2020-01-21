@@ -411,7 +411,7 @@ auto Request::Reset() -> void
     m_bytes_written = 0;
 
     m_on_complete_has_been_called.store(false);
-    m_http_status_code = http::StatusCode::HTTP_504_GATEWAY_TIMEOUT;
+    m_http_status_code = http::StatusCode::HTTP_UNKNOWN;
     m_response_wait_time.reset();
     m_response_wait_time_set_iterator.reset();
 }
