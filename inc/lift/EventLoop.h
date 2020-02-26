@@ -23,8 +23,11 @@ class EventLoop {
 public:
     /**
      * Creates a new lift event loop.
+     * @param max_connections Indicates the maximum number of connections that CURL will maintain.
+     *                        Any connections over the max will be pruned, starting with the oldest.
+     *                        5 is CURL's default value.
      */
-    EventLoop();
+    explicit EventLoop(uint32_t max_connections = 5);
 
     /**
      * Stops the EventLoop and shuts down all resources.
