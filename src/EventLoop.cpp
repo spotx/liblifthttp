@@ -99,7 +99,7 @@ auto requests_accept_async(uv_async_t* handle) -> void;
 auto on_response_wait_time_expired_callback(uv_timer_t* handle) -> void;
 
 
-EventLoop::EventLoop()
+EventLoop::EventLoop(int32_t max_connections)
 {
     uv_async_init(m_loop, &m_async, requests_accept_async);
     m_async.data = this;
@@ -116,6 +116,8 @@ EventLoop::EventLoop()
     curl_multi_setopt(m_cmh, CURLMOPT_SOCKETDATA, this);
     curl_multi_setopt(m_cmh, CURLMOPT_TIMERFUNCTION, curl_start_timeout);
     curl_multi_setopt(m_cmh, CURLMOPT_TIMERDATA, this);
+
+    SetMaxConnections(max_connections);
 
     m_background_thread = std::thread { [this] { run(); } };
 
