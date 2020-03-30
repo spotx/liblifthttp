@@ -91,10 +91,7 @@ public:
      *                        Any connections over the max will be pruned, starting with the oldest.
      *                        5 is CURL's default value.
      */
-    auto SetMaxConnections(const int32_t max_connections) -> void
-    {
-        curl_multi_setopt(m_cmh, CURLMOPT_MAXCONNECTS, static_cast<long>(max_connections));
-    }
+    auto SetMaxConnections(const int32_t max_connections) -> void;
 
 private:
     /**

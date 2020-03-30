@@ -194,6 +194,11 @@ auto EventLoop::StartRequest(
     return true;
 }
 
+auto EventLoop::SetMaxConnections(const int32_t max_connections) -> void
+{
+    curl_multi_setopt(m_cmh, CURLMOPT_MAXCONNECTS, static_cast<long>(max_connections));
+}
+
 auto EventLoop::stopTimedOutRequests() -> void
 {
     // If the wrappers multiset is empty, then we don't have anything to stop
