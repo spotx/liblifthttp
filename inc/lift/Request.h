@@ -466,10 +466,7 @@ private:
      * @param shared_request Pointer to the shared pointer to the SharedRequest that this curl handle should
      *          use in callbacks.
      */
-    auto setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void
-    {
-        curl_easy_setopt(m_curl_handle, CURLOPT_PRIVATE, shared_request);
-    }
+    auto setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void;
 
     /**
      * Sets the HTTP status code (m_http_status_code) using the cURL request -- this will be called either in

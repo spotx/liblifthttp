@@ -100,6 +100,8 @@ if(${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
         -Wno-error=deprecated-declarations
         -Wno-disabled-macro-expansion
         -Wno-covered-switch-default
+        -Wno-disabled-macro-expansion
+        -Wno-ctad-maybe-unsupported
         -fcolor-diagnostics
         -ferror-limit=128
     )

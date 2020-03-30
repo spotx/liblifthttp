@@ -540,6 +540,11 @@ auto Request::getRemainingDownloadBytes() -> ssize_t
     return m_max_download_bytes - m_bytes_written;
 }
 
+auto Request::setSharedPointerOnCurlHandle(std::shared_ptr<SharedRequest>* shared_request) -> void
+{
+    curl_easy_setopt(m_curl_handle, CURLOPT_PRIVATE, shared_request);
+}
+
 auto Request::setHttpStatusCodeFromCurl() -> void
 {
     long http_response_code = 0;
